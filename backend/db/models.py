@@ -29,6 +29,12 @@ class QuestionType(str, enum.Enum):
     terminal = "terminal"
 
 
+class QuestionDifficulty(str, enum.Enum):
+    easy = "easy"
+    medium = "medium"
+    hard = "hard"
+
+
 # --- Core session/container models ---
 class Session(Base):
     __tablename__ = "sessions"
@@ -161,6 +167,9 @@ class LessonQuestion(Base):
     order_index: Mapped[int] = mapped_column(Integer, nullable=False)
     question_type: Mapped[QuestionType] = mapped_column(
         Enum(QuestionType, name="question_type"), nullable=False
+    )
+    difficulty: Mapped[QuestionDifficulty] = mapped_column(
+        Enum(QuestionDifficulty, name="question_difficulty"), nullable=False, default=QuestionDifficulty.easy
     )
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
     answer_hash: Mapped[str] = mapped_column(String, nullable=False)

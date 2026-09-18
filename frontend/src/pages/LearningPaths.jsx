@@ -87,18 +87,14 @@ function LearningPaths() {
         toast('No rooms in this path yet. Content coming soon!', { icon: '🚧' })
         return
       }
-      const firstRoom = detail.rooms[0]
-      if (!firstRoom.id) {
-        toast.error('Room data is malformed.')
-        return
-      }
-      navigate(`/learning/paths/${path.id}/rooms/${firstRoom.id}`)
+      navigate(`/learning/paths/${path.id}`)
     } catch (err) {
       toast.error('Failed to load path: ' + err.message)
     } finally {
       setClicking(null)
     }
   }
+
 
   return (
     <div className="relative w-full min-h-screen px-4 sm:px-6 md:px-8 lg:px-12 xl:px-16 py-8 md:py-12 overflow-hidden bg-white dark:bg-neutral-950">
@@ -170,6 +166,8 @@ function LearningPaths() {
           </div>
         )}
       </div>
+
+
     </div>
   )
 }

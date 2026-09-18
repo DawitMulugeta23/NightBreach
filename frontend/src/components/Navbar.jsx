@@ -11,6 +11,7 @@ function Navbar() {
   const path = location.pathname
   const { user, logout, isAuthenticated } = useAuth()
   const { isDark, toggleTheme } = useTheme()
+  const visibleLinks = isAuthenticated ? NAV_LINKS : []
   const [mobileOpen, setMobileOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
   const profileRef = useRef(null)
@@ -46,7 +47,7 @@ function Navbar() {
         </Link>
 
         <div className="hidden md:flex items-center gap-6 lg:gap-8 text-xs font-semibold uppercase tracking-wider">
-          {NAV_LINKS.map((link) => (
+          {visibleLinks.map((link) => (
             <Link
               key={link.to}
               to={link.to}
@@ -152,7 +153,7 @@ function Navbar() {
       {/* Mobile menu */}
       {mobileOpen && (
         <div className="md:hidden px-4 pb-4 border-t border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-950">
-          {NAV_LINKS.map((link) => (
+          {visibleLinks.map((link) => (
             <Link
               key={link.to}
               to={link.to}

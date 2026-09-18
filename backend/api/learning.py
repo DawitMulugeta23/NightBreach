@@ -72,6 +72,7 @@ class QuestionDetail(BaseModel):
     id: str
     order_index: int
     question_type: str
+    difficulty: str
     prompt: str
     answered: bool
 
@@ -188,7 +189,9 @@ async def get_lesson_detail(lesson_id: str, token: str, db: AsyncSession = Depen
     questions = [
         QuestionDetail(
             id=str(q.id), order_index=q.order_index,
-            question_type=q.question_type.value, prompt=q.prompt,
+            question_type=q.question_type.value,
+            difficulty=q.difficulty.value,
+            prompt=q.prompt,
             answered=q.id in answered_ids,
         )
         for q in lesson.questions
@@ -302,7 +305,7 @@ async def submit_answer(
     for template, resolved in placeholders.items():
         if resolved is None:
             continue
-        if expected_hash == _hash_answer(template):
+        if _hash_answer(template) in (expected_hash.split("|") if expected_hash else []):
             matched_placeholder = True
             if _hash_answer(payload.answer) == _hash_answer(resolved):
                 # correct
@@ -321,7 +324,10 @@ async def submit_answer(
     if matched_placeholder:
         return {"correct": False}
 
-    if _hash_answer(payload.answer) != expected_hash:
+    # Answer hash may contain multiple hashes joined by "|" (synonyms)
+    user_hash = _hash_answer(payload.answer)
+    accepted = expected_hash.split("|") if expected_hash else []
+    if user_hash not in accepted:
         return {"correct": False}
 
     # correct — record progress

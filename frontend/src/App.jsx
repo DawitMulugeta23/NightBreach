@@ -6,6 +6,7 @@ import ProtectedRoute from './components/ProtectedRoute'
 import Home from './pages/Home'
 import LearningPaths from './pages/LearningPaths'
 import LearningRoom from './pages/LearningRoom'
+import LearningPathDetail from './pages/LearningPathDetail'
 import LessonDetail from './pages/LessonDetail'
 import Challenges from './pages/Challenges'
 import Leaderboard from './pages/Leaderboard'
@@ -60,6 +61,14 @@ function App() {
         <Route path="/" element={<Layout />}>
           <Route index element={<Home />} />
           <Route path="learning-paths" element={<LearningPaths />} />
+          <Route
+            path="learning/paths/:pathId"
+            element={
+              <ProtectedRoute>
+                <LearningPathDetail />
+              </ProtectedRoute>
+            }
+          />
           <Route
             path="learning/paths/:pathId/rooms/:roomId"
             element={

@@ -13,7 +13,6 @@ export const COLORS = {
 }
 
 export const NAV_LINKS = [
-  { to: '/', label: 'Home' },
   { to: '/learning-paths', label: 'Learning Paths' },
   { to: '/challenges', label: 'Challenges' },
   { to: '/leaderboard', label: 'Leaderboard' },

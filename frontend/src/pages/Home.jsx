@@ -129,6 +129,47 @@ function Home() {
         </div>
       </section>
 
+      {/* About */}
+      <section className="w-full px-4 sm:px-6 md:px-8 lg:px-12 xl:px-16 py-16 md:py-20 border-t border-neutral-200 dark:border-neutral-800">
+        <div className="max-w-4xl mx-auto">
+          <h2 className="section-title">
+            <i className="fas fa-shield-halved mr-2"></i>ABOUT NIGHTBREACH
+          </h2>
+          <div className="space-y-6">
+            <div>
+              <h3 className="text-sm font-bold uppercase tracking-wider text-emerald-400 mb-2">
+                <i className="fas fa-bullseye mr-2"></i>Our Mission
+              </h3>
+              <p className="text-sm text-neutral-600 dark:text-neutral-400 leading-relaxed">
+                NightBreach exists to give Ethiopian students a genuine, hands-on path into
+                Linux and cybersecurity — starting from first principles, not assumed knowledge.
+                Every lesson pairs real explanation with a live sandbox terminal, so you're never
+                just reading about a command — you're running it.
+              </p>
+            </div>
+            <div>
+              <h3 className="text-sm font-bold uppercase tracking-wider text-emerald-400 mb-2">
+                <i className="fas fa-graduation-cap mr-2"></i>University Affiliation
+              </h3>
+              <p className="text-sm text-neutral-600 dark:text-neutral-400 leading-relaxed">
+                This platform is developed as a Computer Science project at Debre Birhan University, 2025.
+              </p>
+            </div>
+            <div>
+              <h3 className="text-sm font-bold uppercase tracking-wider text-emerald-400 mb-2">
+                <i className="fas fa-terminal mr-2"></i>How It Works
+              </h3>
+              <p className="text-sm text-neutral-600 dark:text-neutral-400 leading-relaxed">
+                Structured Learning Paths break topics into Rooms, and Rooms into individual
+                Lessons — each covering one command or concept in depth, with an on-demand
+                terminal to practice in immediately. Once you're comfortable, Challenges let you
+                apply everything in flag-based CTF-style exercises.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* Footer map */}
       <div className="relative h-40 md:h-56 overflow-hidden">
         <MapBackground position="center-right" opacity={25} />
