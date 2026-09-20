@@ -58,3 +58,5 @@ async def health_db(db: AsyncSession = Depends(get_db)):
     result = await db.execute(text("SELECT 1"))
     return {"db_status": "ok", "result": result.scalar()}
 # test auto-deploy
+# test auto-deploy
+# test auto-deploy and check
