@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     net-tools \
     iputils-ping \
     tree \
+    nmap\
     less \
     man-db \
     && rm -rf /var/lib/apt/lists/*
