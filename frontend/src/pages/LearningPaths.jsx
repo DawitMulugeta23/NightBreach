@@ -7,6 +7,7 @@ import LoadingSpinner from '../components/LoadingSpinner'
 
 function pickIcon(slug = '') {
   if (slug.includes('linux')) return 'fa-terminal'
+  if (slug.includes('windows')) return 'fa-desktop'
   if (slug.includes('network')) return 'fa-network-wired'
   if (slug.includes('cyber') || slug.includes('fundamental')) return 'fa-shield-halved'
   if (slug.includes('defensive')) return 'fa-shield-cat'

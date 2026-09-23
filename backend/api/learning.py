@@ -22,7 +22,12 @@ _docker_client = get_docker_client()
 
 router = APIRouter(prefix="/learning", tags=["learning"])
 
-FOUNDATION_SLUGS = {"linux-fundamentals", "networking-fundamentals", "fundamental-cybersecurity"}
+FOUNDATION_SLUGS = {
+    "linux-fundamentals",
+    "networking-fundamentals",
+    "fundamental-cybersecurity",
+    "windows-fundamentals",  # Windows course — foundation tier like Linux/Networking
+}
 
 
 async def _is_path_completed(db: AsyncSession, user_id, path_id) -> bool:

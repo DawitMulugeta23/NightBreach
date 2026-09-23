@@ -19,6 +19,7 @@ function pickIcon(title = '') {
   const t = title.toLowerCase()
   if (t.includes('cybersecurity zero') || t.includes('essential')) return 'fa-lock'
   if (t.includes('linux')) return 'fa-terminal'
+  if (t.includes('windows')) return 'fa-desktop'
   if (t.includes('network')) return 'fa-globe'
   if (t.includes('recon') || t.includes('osint')) return 'fa-magnifying-glass'
   if (t.includes('vulnerab')) return 'fa-book'
