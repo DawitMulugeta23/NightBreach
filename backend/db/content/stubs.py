@@ -1,14 +1,6 @@
 """Placeholder paths that exist in the roadmap but have no content yet."""
 
-PATHS = [    {
-    'slug': 'fundamental-cybersecurity',
-    'title': 'Cyber Security',
-    'description': 'Core principles of information security, risk management, and threat landscapes.',
-    'icon': '/fundamentalCybersecurity.jpeg',
-    'order_index': 3,
-    'rooms': [
-    ],
-},
+PATHS = [
     {
     'slug': 'defensive-security',
     'title': 'Defensive Security',
