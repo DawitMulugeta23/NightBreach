@@ -190,6 +190,25 @@ class UserQuestionProgress(Base):
     answered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class UserWrongAttempt(Base):
+    """
+    Tombstone: a wrong submission for a question the user has not yet answered
+    correctly. Separate from UserQuestionProgress, whose existence must keep
+    meaning "answered correctly" — this one means the opposite, and is what
+    keeps Algorithm 4's first-attempt accuracy correct across restarts and
+    multiple worker processes.
+    """
+    __tablename__ = "user_wrong_attempts"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    question_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("lesson_questions.id", ondelete="CASCADE"), primary_key=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class UserLessonProgress(Base):
     __tablename__ = "user_lesson_progress"
 

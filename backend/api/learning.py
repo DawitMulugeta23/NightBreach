@@ -9,7 +9,7 @@ from sqlalchemy.orm import selectinload
 from db.session import get_db
 from db.models import (
     LearningPath, Room, Lesson, LessonQuestion, QuestionType,
-    UserQuestionProgress, UserLessonProgress, User, ContainerStatus,
+    UserQuestionProgress, UserLessonProgress, UserWrongAttempt, User, ContainerStatus,
 )
 from core.security import get_current_user_id
 from core.onboarding_quiz import UPGRADE_THRESHOLD, UPGRADE_WINDOW
@@ -353,18 +353,7 @@ async def submit_answer(
             matched_placeholder = True
             correct = _hash_answer(payload.answer) == _hash_answer(resolved)
             if correct:
-                result = await db.execute(
-                    select(UserQuestionProgress)
-                    .where(UserQuestionProgress.user_id == user_id)
-                    .where(UserQuestionProgress.question_id == question.id)
-                )
-                existing = result.scalar_one_or_none()
-                if existing is None:
-                    db.add(UserQuestionProgress(
-                        user_id=user_id, question_id=question.id,
-                        first_attempt_correct=True,
-                    ))
-                    await db.commit()
+                await _record_correct_answer(db, user_id, question.id)
                 await _maybe_mark_lesson_complete(db, user_id, question.lesson_id)
                 await check_auto_upgrade(db, user_id)
                 return {"correct": True}
@@ -386,28 +375,51 @@ async def submit_answer(
         .where(UserQuestionProgress.user_id == user_id)
         .where(UserQuestionProgress.question_id == question.id)
     )
-    if result.scalar_one_or_none() is None:
-        db.add(UserQuestionProgress(
-            user_id=user_id, question_id=question.id,
-            first_attempt_correct=True,
-        ))
-        await db.commit()
+    await _record_correct_answer(db, user_id, question.id)
     await _maybe_mark_lesson_complete(db, user_id, question.lesson_id)
     await check_auto_upgrade(db, user_id)
     return {"correct": True}
 
 
-_wrong_first_attempts: set[tuple] = set()
+async def _record_correct_answer(db: AsyncSession, user_id, question_id):
+    """
+    Records that this question was answered correctly (progress row is the
+    per-user, per-question existence marker). If a wrong attempt was recorded
+    earlier, the first attempt wasn't correct: the flag is set accordingly and
+    the tombstone row is consumed — the flag is the single source of truth.
+    """
+    result = await db.execute(
+        select(UserQuestionProgress)
+        .where(UserQuestionProgress.user_id == user_id)
+        .where(UserQuestionProgress.question_id == question_id)
+    )
+    if result.scalar_one_or_none() is not None:
+        return
+
+    result = await db.execute(
+        select(UserWrongAttempt)
+        .where(UserWrongAttempt.user_id == user_id)
+        .where(UserWrongAttempt.question_id == question_id)
+    )
+    tombstone = result.scalar_one_or_none()
+    if tombstone is not None:
+        await db.delete(tombstone)
+
+    db.add(UserQuestionProgress(
+        user_id=user_id, question_id=question_id,
+        first_attempt_correct=tombstone is None,
+    ))
+    await db.commit()
 
 
 async def _record_wrong_first_attempt(db: AsyncSession, user_id, question_id):
     """
     A question is 'first-attempt correct' only if the very first submission
-    for it was correct. If we ever see a wrong submission for a question the
-    user hasn't already answered correctly, mark that question's eventual
-    UserQuestionProgress row (when it's created) as first_attempt_correct=False.
-    Tracked in-memory per-process since a wrong attempt with no existing
-    progress row has nothing to update yet.
+    for it was correct. A wrong submission for a question the user hasn't
+    already answered correctly is recorded as a tombstone row in
+    user_wrong_attempts, so it survives restarts and is visible to every
+    worker process. The tombstone is consumed when the question is later
+    answered correctly (see _record_correct_answer).
     """
     result = await db.execute(
         select(UserQuestionProgress)
@@ -416,12 +428,21 @@ async def _record_wrong_first_attempt(db: AsyncSession, user_id, question_id):
     )
     if result.scalar_one_or_none() is not None:
         return  # already answered correctly previously; doesn't affect first-attempt status
-    _wrong_first_attempts.add((str(user_id), str(question_id)))
+
+    result = await db.execute(
+        select(UserWrongAttempt)
+        .where(UserWrongAttempt.user_id == user_id)
+        .where(UserWrongAttempt.question_id == question_id)
+    )
+    if result.scalar_one_or_none() is None:
+        db.add(UserWrongAttempt(user_id=user_id, question_id=question_id))
+        await db.commit()
 
 
 async def check_auto_upgrade(db: AsyncSession, user_id) -> None:
     """Algorithm 4 (spec 4.1): promote strict -> free after UPGRADE_WINDOW
     completed rooms if first-attempt accuracy across them is >= UPGRADE_THRESHOLD."""
+    # Bail out early for free-mode/unknown users before doing any queries.
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if user is None or user.progression_mode != "strict":
@@ -439,13 +460,12 @@ async def check_auto_upgrade(db: AsyncSession, user_id) -> None:
     for _progress, room_id in rows:
         if room_id not in seen_rooms:
             seen_rooms.append(room_id)
-        if len(seen_rooms) >= UPGRADE_WINDOW:
-            break
 
-    if len(seen_rooms) < UPGRADE_WINDOW:
-        return
-
+    # Most recently completed rooms (zero-question lessons count too — a
+    # completed room with no questions still says something about accuracy).
     recent_room_ids = seen_rooms[:UPGRADE_WINDOW]
+    if len(recent_room_ids) < UPGRADE_WINDOW:
+        return
 
     result = await db.execute(
         select(Lesson.id).where(Lesson.room_id.in_(recent_room_ids))
@@ -470,8 +490,7 @@ async def check_auto_upgrade(db: AsyncSession, user_id) -> None:
     progress_rows = result.scalars().all()
 
     first_attempt_correct_count = sum(
-        1 for p in progress_rows
-        if p.first_attempt_correct and (str(user_id), str(p.question_id)) not in _wrong_first_attempts
+        1 for p in progress_rows if p.first_attempt_correct
     )
 
     accuracy = first_attempt_correct_count / total_questions
@@ -493,6 +512,7 @@ async def _maybe_mark_lesson_complete(db: AsyncSession, user_id, lesson_id):
         if result.scalar_one_or_none() is None:
             db.add(UserLessonProgress(user_id=user_id, lesson_id=lesson_id))
             await db.commit()
+        await check_auto_upgrade(db, user_id)
         return
 
     result = await db.execute(
@@ -511,6 +531,7 @@ async def _maybe_mark_lesson_complete(db: AsyncSession, user_id, lesson_id):
         if result.scalar_one_or_none() is None:
             db.add(UserLessonProgress(user_id=user_id, lesson_id=lesson_id))
             await db.commit()
+        await check_auto_upgrade(db, user_id)
 
 
 class RecentActivityItem(BaseModel):

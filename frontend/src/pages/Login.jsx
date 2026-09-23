@@ -23,7 +23,8 @@ function Login() {
       const userData = await authApi.getCurrentUser(data.access_token)
       login(data.access_token, userData)
       toast.success(`Welcome back, ${userData.username}!`, { id: toastId })
-      navigate('/')
+      // Users who never completed the placement quiz finish it before entering
+      navigate(userData.onboarding_quiz_completed ? '/' : '/onboarding')
     } catch (err) {
       setError(err.message)
       toast.error(err.message || 'Login failed', { id: toastId })

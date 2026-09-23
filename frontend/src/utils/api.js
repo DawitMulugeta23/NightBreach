@@ -41,6 +41,15 @@ export const learningApi = {
   getStats: (token) => apiRequest('/learning/stats', {}, token),
 }
 
+export const onboardingApi = {
+  getQuiz: () => apiRequest('/auth/onboarding-quiz'),
+  submitQuiz: (answers, token) =>
+    apiRequest('/auth/onboarding-quiz/submit', {
+      method: 'POST',
+      body: JSON.stringify({ answers }),
+    }, token),
+}
+
 export const tokenStorage = {
   get: () => localStorage.getItem('roha_token'),
   set: (token) => localStorage.setItem('roha_token', token),

@@ -30,7 +30,8 @@ function Register() {
       tokenStorage.set(data.access_token)
       const userData = await authApi.getCurrentUser(data.access_token)
       login(data.access_token, userData)
-      navigate('/')
+      // New accounts always take the placement quiz (Algorithm 1, spec §4.1)
+      navigate('/onboarding')
     } catch (err) {
       setError(err.message)
     } finally {

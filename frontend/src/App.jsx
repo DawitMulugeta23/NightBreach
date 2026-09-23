@@ -12,6 +12,7 @@ import Challenges from './pages/Challenges'
 import Leaderboard from './pages/Leaderboard'
 import Login from './pages/Login'
 import Register from './pages/Register'
+import OnboardingQuiz from './pages/OnboardingQuiz'
 import Dashboard from './pages/Dashboard'
 import Arena from './pages/Arena'
 import Settings from './pages/Settings'
@@ -89,6 +90,14 @@ function App() {
           <Route path="leaderboard" element={<Leaderboard />} />
           <Route path="login" element={<Login />} />
           <Route path="register" element={<Register />} />
+          <Route
+            path="onboarding"
+            element={
+              <ProtectedRoute requireOnboarding={false}>
+                <OnboardingQuiz />
+              </ProtectedRoute>
+            }
+          />
           <Route
             path="dashboard"
             element={
