@@ -40,6 +40,10 @@ class QuizQuestion(BaseModel):
 
 class QuizSubmission(BaseModel):
     answers: dict[str, str]  # {question_id: chosen_option_id}
+    # "Do you want a strict path?" — yes: room n+1 unlocks only after room n
+    # is completed; no: every room is open from the start. None keeps the
+    # legacy score-based assignment (used if the client doesn't send it).
+    wants_strict: bool | None = None
 
 
 class QuizResult(BaseModel):
@@ -113,7 +117,12 @@ async def submit_onboarding_quiz(
         raise HTTPException(status_code=404, detail="User not found")
 
     score = score_answers(payload.answers)
-    user.progression_mode = "free" if score >= FREE_MODE_THRESHOLD else "strict"
+    if payload.wants_strict is not None:
+        # The user's explicit choice decides the mode — the quiz score is
+        # informational (and still feeds the strict->free auto-upgrade).
+        user.progression_mode = "strict" if payload.wants_strict else "free"
+    else:
+        user.progression_mode = "free" if score >= FREE_MODE_THRESHOLD else "strict"
     user.onboarding_quiz_completed = True
     await db.commit()
 

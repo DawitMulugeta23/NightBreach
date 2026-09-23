@@ -43,10 +43,12 @@ export const learningApi = {
 
 export const onboardingApi = {
   getQuiz: () => apiRequest('/auth/onboarding-quiz'),
-  submitQuiz: (answers, token) =>
+  // wantsStrict: the answer to "Do you want a strict path?" (true = yes).
+  // Pass null to let the backend decide from the quiz score.
+  submitQuiz: (answers, token, wantsStrict = null) =>
     apiRequest('/auth/onboarding-quiz/submit', {
       method: 'POST',
-      body: JSON.stringify({ answers }),
+      body: JSON.stringify({ answers, wants_strict: wantsStrict }),
     }, token),
 }
 

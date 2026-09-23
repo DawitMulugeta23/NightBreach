@@ -6,9 +6,11 @@ import { useAuth } from '../context/AuthContext'
 
 /**
  * Onboarding quiz (spec §4.1, Algorithm 1). Shown once after registration
- * (or after login for any user who hasn't completed it yet). The backend
- * scores the answers and assigns the user's progression_mode — the result
- * screen only reflects what the server decided.
+ * (or after login for any user who hasn't completed it yet). After the last
+ * question the user is asked "Do you want a strict path?": yes → room n+1
+ * unlocks only after room n is completed; no → every room is open from the
+ * start. The choice is sent to the backend as wants_strict, which sets the
+ * user's progression_mode (the quiz score is informational).
  */
 function OnboardingQuiz() {
   const navigate = useNavigate()
@@ -18,6 +20,7 @@ function OnboardingQuiz() {
   const [submitting, setSubmitting] = useState(false)
   const [step, setStep] = useState(0)
   const [answers, setAnswers] = useState({})
+  const [wantsStrict, setWantsStrict] = useState(null) // "Do you want a strict path?"
   const [result, setResult] = useState(null)
   const [error, setError] = useState('')
 
@@ -52,7 +55,7 @@ function OnboardingQuiz() {
     setSubmitting(true)
     setError('')
     try {
-      const data = await onboardingApi.submitQuiz(answers, token)
+      const data = await onboardingApi.submitQuiz(answers, token, wantsStrict)
       // Refresh the stored user so progression_mode is up to date app-wide.
       try {
         const userData = await authApi.getCurrentUser(token)
@@ -67,7 +70,8 @@ function OnboardingQuiz() {
   }
 
   const goNext = () => {
-    if (step < questions.length - 1) setStep(step + 1)
+    // Last stop before submitting: the "Do you want a strict path?" question.
+    if (step < questions.length) setStep(step + 1)
     else handleSubmit()
   }
 
@@ -113,15 +117,14 @@ function OnboardingQuiz() {
 
             {free ? (
               <p className="text-sm text-neutral-600 dark:text-neutral-300 leading-relaxed">
-                Strong fundamentals detected — you've been placed in{' '}
-                <span className="text-emerald-400 font-semibold">free navigation</span>. All modules
-                are open; move at your own pace.
+                You chose{' '}
+                <span className="text-emerald-400 font-semibold">free navigation</span> — every
+                module is unlocked from the start. Jump to any room and move at your own pace.
               </p>
             ) : (
               <p className="text-sm text-neutral-600 dark:text-neutral-300 leading-relaxed">
-                You've been placed in{' '}
-                <span className="text-amber-400 font-semibold">guided mode</span>: modules unlock as
-                you complete the previous one. Score{' '}
+                You chose a <span className="text-amber-400 font-semibold">strict path</span>: each
+                module unlocks after you complete the previous one. Score{' '}
                 <span className="text-emerald-400 font-semibold">90%+ first-attempt accuracy</span>{' '}
                 across your recent modules and you'll be promoted to free navigation automatically.
               </p>
@@ -157,8 +160,10 @@ function OnboardingQuiz() {
   }
 
   // ---- Question flow ----
-  const answeredCount = Object.keys(answers).length
-  const currentAnswered = !!answers[current?.id]
+  const totalSteps = questions.length + 1 // + the strict-path question
+  const answeredCount = Object.keys(answers).length + (wantsStrict !== null ? 1 : 0)
+  const currentAnswered =
+    step === questions.length ? wantsStrict !== null : !!answers[current?.id]
 
   return (
     <div className="min-h-[calc(100vh-200px)] flex items-center justify-center px-4 py-14 relative overflow-hidden">
@@ -185,23 +190,62 @@ function OnboardingQuiz() {
           <div className="flex-1 h-1.5 rounded-full bg-neutral-200 dark:bg-neutral-800 overflow-hidden">
             <div
               className="h-full bg-emerald-400 transition-all duration-300"
-              style={{ width: `${(answeredCount / questions.length) * 100}%` }}
+              style={{ width: `${(Math.min(answeredCount, totalSteps) / totalSteps) * 100}%` }}
             ></div>
           </div>
           <span className="text-xs text-neutral-500 font-mono">
-            {step + 1} / {questions.length}
+            {Math.min(step + 1, totalSteps)} / {totalSteps}
           </span>
         </div>
 
         <div className="bg-neutral-50 dark:bg-neutral-900/80 border border-neutral-200 dark:border-neutral-800 rounded-2xl p-6 md:p-8 shadow-2xl shadow-black/50">
-          <p className="text-xs uppercase tracking-widest text-neutral-500 mb-2">
-            Question {step + 1}
-          </p>
-          <h3 className="text-lg font-bold text-neutral-900 dark:text-white mb-6 leading-snug">
-            {current?.prompt}
-          </h3>
+          {step === questions.length ? (
+            <>
+              <p className="text-xs uppercase tracking-widest text-neutral-500 mb-2">
+                One last thing
+              </p>
+              <h3 className="text-lg font-bold text-neutral-900 dark:text-white mb-2 leading-snug">
+                Do you want a strict path?
+              </h3>
+              <p className="text-xs text-neutral-600 dark:text-neutral-400 mb-6 leading-relaxed">
+                <span className="text-emerald-400 font-semibold">Yes</span> — each module unlocks
+                only after you complete the previous one.{' '}
+                <span className="text-cyan-300 font-semibold">No</span> — every module is unlocked
+                from the start; jump straight to any room.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <button
+                  onClick={() => setWantsStrict(true)}
+                  className={`px-4 py-3.5 rounded-xl border text-sm font-semibold transition-all flex items-center justify-center gap-2 ${
+                    wantsStrict === true
+                      ? 'border-emerald-400/60 bg-emerald-400/10 text-neutral-900 dark:text-white'
+                      : 'border-neutral-200 dark:border-neutral-800 text-neutral-600 dark:text-neutral-300 hover:border-emerald-400/40 hover:bg-neutral-100 dark:hover:bg-neutral-800/60'
+                  }`}
+                >
+                  <i className="fas fa-route"></i> YES
+                </button>
+                <button
+                  onClick={() => setWantsStrict(false)}
+                  className={`px-4 py-3.5 rounded-xl border text-sm font-semibold transition-all flex items-center justify-center gap-2 ${
+                    wantsStrict === false
+                      ? 'border-cyan-400/60 bg-cyan-400/10 text-neutral-900 dark:text-white'
+                      : 'border-neutral-200 dark:border-neutral-800 text-neutral-600 dark:text-neutral-300 hover:border-cyan-400/40 hover:bg-neutral-100 dark:hover:bg-neutral-800/60'
+                  }`}
+                >
+                  <i className="fas fa-gauge-high"></i> NO
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="text-xs uppercase tracking-widest text-neutral-500 mb-2">
+                Question {step + 1}
+              </p>
+              <h3 className="text-lg font-bold text-neutral-900 dark:text-white mb-6 leading-snug">
+                {current?.prompt}
+              </h3>
 
-          <div className="space-y-3">
+              <div className="space-y-3">
             {current?.options.map((opt) => {
               const selected = answers[current.id] === opt.id
               return (
@@ -225,7 +269,9 @@ function OnboardingQuiz() {
                 </button>
               )
             })}
-          </div>
+              </div>
+            </>
+          )}
 
           {error && (
             <div className="text-red-400 text-xs mt-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20">
@@ -251,7 +297,7 @@ function OnboardingQuiz() {
                 <>
                   <i className="fas fa-spinner fa-spin"></i> SCORING...
                 </>
-              ) : step === questions.length - 1 ? (
+              ) : step === questions.length ? (
                 <>
                   FINISH <i className="fas fa-flag-checkered"></i>
                 </>
