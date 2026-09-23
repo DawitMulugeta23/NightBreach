@@ -11,7 +11,7 @@ function pickIcon(slug = '') {
   if (slug.includes('network')) return 'fa-network-wired'
   if (slug.includes('cyber') || slug.includes('fundamental')) return 'fa-shield-halved'
   if (slug.includes('defensive')) return 'fa-shield-cat'
-  if (slug.includes('offensive')) return 'fa-crosshairs'
+  if (slug.includes('offensive') || slug.includes('red-team')) return 'fa-crosshairs'
   if (slug.includes('web')) return 'fa-code'
   return 'fa-book'
 }

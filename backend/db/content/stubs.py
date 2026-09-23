@@ -1,106 +1,117 @@
-"""Placeholder paths that exist in the roadmap but have no content yet."""
+"""Paths awaiting full content.
+
+- defensive-security: placeholder from the original roadmap.
+- web-pentesting / network-pentesting / red-teaming: the three divisions of
+  the former offensive-security path. Room skeletons below define the
+  curriculum; lessons and questions are implemented per room in follow-ups.
+"""
 
 PATHS = [
     {
-    'slug': 'defensive-security',
-    'title': 'Defensive Security',
-    'description': 'Learn to detect, prevent, and mitigate attacks and harden systems.',
-    'icon': '/defensive.jpeg',
-    'order_index': 4,
-    'rooms': [
-    ],
-},
+        'slug': 'defensive-security',
+        'title': 'Defensive Security',
+        'description': 'Learn to detect, prevent, and mitigate attacks and harden systems.',
+        'icon': '/defensive.jpeg',
+        'order_index': 4,
+        'rooms': [],
+    },
     {
-    'slug': 'offensive-security',
-    'title': 'Offensive Security',
-    'description': 'Understand ethical hacking techniques, vulnerability exploitation, and post-exploitation.',
-    'icon': '/offensive.jpeg',
-    'order_index': 5,
-    'rooms': [
-{
-    'order_index': 1,
-    'title': 'Cybersecurity Zero',
-    'description': 'Core principles, threat landscapes, and mindset.',
-    'lessons': [],
-},
-{
-    'order_index': 2,
-    'title': 'Linux Command Line',
-    'description': 'Mastering the essential hacking OS.',
-    'lessons': [],
-},
-{
-    'order_index': 3,
-    'title': 'Networking Essentials',
-    'description': 'Protocols, subnetting, and traffic analysis for offense.',
-    'lessons': [],
-},
-{
-    'order_index': 4,
-    'title': 'Recon & OSINT',
-    'description': 'Passive information gathering techniques.',
-    'lessons': [
-        {
-            'order_index': 1,
-            'title': 'Scanning with Nmap',
-            'blocks': [
-                {"type": "text", "heading": "What is Nmap?", "body": "Nmap (Network Mapper) is the standard tool for discovering what's running on a network. Given a target, it tells you which ports are open, what service is listening on each one, and often the exact software version — the first step in almost any real penetration test."},
-                {"type": "text", "heading": "Why Scan First?", "body": "You can't attack what you don't know exists. Before trying any exploit, a pentester needs to know: is the target alive? Which ports respond? What service is behind each port? Nmap answers all three questions in one command."},
-                {"type": "text", "heading": "A Basic Scan", "body": "The simplest form is `nmap <target>` — for example `nmap localhost` or `nmap 192.168.1.10`. This checks the 1,000 most common ports and reports which are open, closed, or filtered."},
-                {"type": "text", "heading": "Service Detection", "body": "Adding `-sV` tells Nmap to probe each open port further and guess the exact service and version running there, e.g. 'OpenSSH 8.9' instead of just 'port 22 open'. This is often the detail that tells you which known vulnerability to try."},
-                {"type": "practice", "command": "nmap -sV localhost", "instructions": "Run nmap -sV localhost in the terminal and note what services it reports."}
-            ],
-            'questions': [
-                {
-                    'order_index': 1,
-                    'question_type': 'text',
-                    'difficulty': 'easy',
-                    'prompt': 'What flag tells Nmap to detect the version of services running on open ports?',
-                    'answer_hash': '1af832b1983fe2d07b0e452da1233b5ef3396582abe43116e3ac3085360fec01',
-                    'setup_script': None,
-                },
-                {
-                    'order_index': 2,
-                    'question_type': 'terminal',
-                    'difficulty': 'easy',
-                    'prompt': 'Run nmap -sV localhost in your terminal. Which port number does it report as open?',
-                    'answer_hash': '785f3ec7eb32f30b90cd0fcf3657d388b5ff4297f2f9716ff66e9b69c05ddd09',
-                    'setup_script': None,
-                },
-            ],
-        },
-    ],
-},
-{
-    'order_index': 5,
-    'title': 'Vulnerability Research',
-    'description': 'Finding and analyzing weaknesses.',
-    'lessons': [],
-},
-{
-    'order_index': 6,
-    'title': 'Exploitation Frameworks',
-    'description': 'Using tools to gain access.',
-    'lessons': [],
-},
-{
-    'order_index': 7,
-    'title': 'Web App Pentesting',
-    'description': 'OWASP Top 10 and advanced web attacks.',
-    'lessons': [],
-},
-{
-    'order_index': 8,
-    'title': 'Privilege Escalation',
-    'description': 'Moving from user to admin, staying hidden.',
-    'lessons': [],
-},
-{
-    'order_index': 9,
-    'title': 'Advanced Red Teaming',
-    'description': 'Full-scope adversarial simulations.',
-    'lessons': [],
-},
-],
-}
+        'slug': 'web-pentesting',
+        'title': 'Web App Pentesting',
+        'description': 'Recon, exploit, and harden web applications — from HTTP fundamentals to authentication attacks.',
+        'icon': '/webapppentest.jpg',
+        'order_index': 6,
+        'rooms': [
+            {
+                'order_index': 1,
+                'title': 'Web Fundamentals for Attackers',
+                'description': 'HTTP mechanics, headers, cookies, and how servers really talk.',
+                'lessons': [],
+            },
+            {
+                'order_index': 2,
+                'title': 'Recon & Mapping',
+                'description': 'Directory discovery, technology fingerprinting, and attack-surface mapping.',
+                'lessons': [],
+            },
+            {
+                'order_index': 3,
+                'title': 'Injection Attacks',
+                'description': 'SQL injection, command injection, and template injection.',
+                'lessons': [],
+            },
+            {
+                'order_index': 4,
+                'title': 'Authentication & Session Attacks',
+                'description': 'Brute force, session handling flaws, and access control failures.',
+                'lessons': [],
+            },
+        ],
+    },
+    {
+        'slug': 'network-pentesting',
+        'title': 'Network Pentesting',
+        'description': 'Scan, enumerate, and exploit network services and hosts — nmap to exploitation.',
+        'icon': '/Networking.jpg',
+        'order_index': 7,
+        'rooms': [
+            {
+                'order_index': 1,
+                'title': 'Scanning & Enumeration',
+                'description': 'Host discovery, port scanning, service and OS fingerprinting at operator depth.',
+                'lessons': [],
+            },
+            {
+                'order_index': 2,
+                'title': 'SMB & Windows Services',
+                'description': 'Enumerating and exploiting SMB, RPC, and Windows network services.',
+                'lessons': [],
+            },
+            {
+                'order_index': 3,
+                'title': 'Linux Services & Exploitation',
+                'description': 'Enumerating SSH, FTP, and web services; finding and using public exploits.',
+                'lessons': [],
+            },
+            {
+                'order_index': 4,
+                'title': 'Post-Exploitation & Pivoting',
+                'description': 'Shells, privilege escalation basics, and moving through networks.',
+                'lessons': [],
+            },
+        ],
+    },
+    {
+        'slug': 'red-teaming',
+        'title': 'Red Teaming',
+        'description': 'Adversary simulation: C2, persistence, lateral movement, and evading detection.',
+        'icon': '/redteam.svg',
+        'order_index': 8,
+        'rooms': [
+            {
+              'order_index': 1,
+                'title': 'Red Team Methodology',
+                'description': 'Objectives, threat emulation, rules of engagement, and OPSEC.',
+                'lessons': [],
+            },
+            {
+                'order_index': 2,
+                'title': 'Command & Control',
+                'description': 'C2 infrastructure, channels, and beaconing.',
+                'lessons': [],
+            },
+            {
+                'order_index': 3,
+                'title': 'Persistence & Lateral Movement',
+                'description': 'Staying in, moving sideways, and credential reuse across the estate.',
+                'lessons': [],
+            },
+            {
+                'order_index': 4,
+                'title': 'Evading the Blue Team',
+                'description': 'Detection logic, telemetry gaps, and what the logs actually show.',
+                'lessons': [],
+            },
+        ],
+    },
 ]

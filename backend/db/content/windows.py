@@ -32,7 +32,7 @@ PATH = {
     'title': 'Windows for Cybersecurity',
     'description': 'Master Windows internals, administration, and attack surface from first principles.',
     'icon': '/windows.svg',
-    'order_index': 6,
+    'order_index': 5,
     'rooms': [
         # ------------------------------------------------------------------
         {

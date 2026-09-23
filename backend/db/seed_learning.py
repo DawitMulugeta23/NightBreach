@@ -33,7 +33,33 @@ async def seed(db=None):
         return await _seed_with(session)
 
 
+async def _retire_removed_paths(db):
+    """Remove path rows whose slug vanished from the content modules — but only
+    empty shells (no lessons anywhere beneath them, hence no user progress).
+    Paths with real content are never touched automatically; the operator gets
+    a loud warning instead."""
+    live_slugs = {p['slug'] for p in SEED_DATA}
+    result = await db.execute(select(LearningPath))
+    for stale in result.scalars():
+        if stale.slug in live_slugs:
+            continue
+        has_lessons = await db.scalar(
+            select(Lesson.id)
+            .join(Room, Lesson.room_id == Room.id)
+            .where(Room.path_id == stale.id)
+            .limit(1)
+        )
+        if has_lessons:
+            print(f'WARNING: path {stale.slug!r} is no longer in content but has lessons — '
+                  f'NOT deleting automatically. Handle manually if truly retired.')
+            continue
+        print(f'Retired empty path: {stale.slug!r} (removed from content modules)')
+        await db.delete(stale)
+    await db.flush()
+
+
 async def _seed_with(db):
+    await _retire_removed_paths(db)
     for path_data in SEED_DATA:
         result = await db.execute(
             select(LearningPath).where(LearningPath.slug == path_data['slug'])
