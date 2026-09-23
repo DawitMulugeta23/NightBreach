@@ -3,6 +3,7 @@ import hashlib
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select, func
+from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -387,6 +388,10 @@ async def _record_correct_answer(db: AsyncSession, user_id, question_id):
     per-user, per-question existence marker). If a wrong attempt was recorded
     earlier, the first attempt wasn't correct: the flag is set accordingly and
     the tombstone row is consumed — the flag is the single source of truth.
+
+    If the tombstone table is missing (deployed code ahead of migrations), we
+    degrade gracefully: the answer still records, with an optimistic
+    first_attempt_correct=True, instead of failing the submission.
     """
     result = await db.execute(
         select(UserQuestionProgress)
@@ -396,12 +401,18 @@ async def _record_correct_answer(db: AsyncSession, user_id, question_id):
     if result.scalar_one_or_none() is not None:
         return
 
-    result = await db.execute(
-        select(UserWrongAttempt)
-        .where(UserWrongAttempt.user_id == user_id)
-        .where(UserWrongAttempt.question_id == question_id)
-    )
-    tombstone = result.scalar_one_or_none()
+    tombstone = None
+    try:
+        result = await db.execute(
+            select(UserWrongAttempt)
+            .where(UserWrongAttempt.user_id == user_id)
+            .where(UserWrongAttempt.question_id == question_id)
+        )
+        tombstone = result.scalar_one_or_none()
+    except ProgrammingError as e:
+        await db.rollback()
+        print(f"WARNING: user_wrong_attempts unavailable ({e.orig.__class__.__name__}); "
+              f"recording answer with first_attempt_correct=True. Run: alembic upgrade head")
     if tombstone is not None:
         await db.delete(tombstone)
 
@@ -429,14 +440,19 @@ async def _record_wrong_first_attempt(db: AsyncSession, user_id, question_id):
     if result.scalar_one_or_none() is not None:
         return  # already answered correctly previously; doesn't affect first-attempt status
 
-    result = await db.execute(
-        select(UserWrongAttempt)
-        .where(UserWrongAttempt.user_id == user_id)
-        .where(UserWrongAttempt.question_id == question_id)
-    )
-    if result.scalar_one_or_none() is None:
-        db.add(UserWrongAttempt(user_id=user_id, question_id=question_id))
-        await db.commit()
+    try:
+        result = await db.execute(
+            select(UserWrongAttempt)
+            .where(UserWrongAttempt.user_id == user_id)
+            .where(UserWrongAttempt.question_id == question_id)
+        )
+        if result.scalar_one_or_none() is None:
+            db.add(UserWrongAttempt(user_id=user_id, question_id=question_id))
+            await db.commit()
+    except ProgrammingError as e:
+        await db.rollback()
+        print(f"WARNING: user_wrong_attempts unavailable ({e.orig.__class__.__name__}); "
+              f"wrong attempt not recorded. Run: alembic upgrade head")
 
 
 async def check_auto_upgrade(db: AsyncSession, user_id) -> None:
