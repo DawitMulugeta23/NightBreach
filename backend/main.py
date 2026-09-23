@@ -24,6 +24,34 @@ ALLOWED_ORIGINS = [
 ]
 
 
+async def _ensure_schema_safety_net():
+    """
+    Safety net for tables the running code requires but that older databases
+    may not have yet (e.g. deploying new code without running
+    `alembic upgrade head` first). Each statement is IF NOT EXISTS, so this is
+    idempotent and costs one round-trip at startup. The authoritative source
+    of truth remains Alembic — this only prevents 500s in between.
+    """
+    statements = [
+        """
+        CREATE TABLE IF NOT EXISTS user_wrong_attempts (
+            user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            question_id UUID NOT NULL REFERENCES lesson_questions(id) ON DELETE CASCADE,
+            created_at TIMESTAMPTZ DEFAULT now(),
+            PRIMARY KEY (user_id, question_id)
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS ix_user_wrong_attempts_user_id ON user_wrong_attempts (user_id)",
+    ]
+    try:
+        async with AsyncSessionLocal() as db:
+            for stmt in statements:
+                await db.execute(text(stmt))
+            await db.commit()
+    except Exception as e:
+        print(f"WARNING: schema safety net failed (server may still work): {e}")
+
+
 async def _reconcile_orphaned_containers():
     async with AsyncSessionLocal() as db:
         result = await db.execute(select(Container).where(Container.status == ContainerStatus.running))
@@ -35,6 +63,7 @@ async def _reconcile_orphaned_containers():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    await _ensure_schema_safety_net()
     await _reconcile_orphaned_containers()
     yield
 
