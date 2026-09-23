@@ -982,6 +982,305 @@ SEED_DATA = [
         'icon': '/Networking.jpg',
         'order_index': 2,
         'rooms': [
+            {
+                'order_index': 1,
+                'title': 'Network Foundations',
+                'description': 'What a network is, how the Internet fits together, and how addresses work.',
+                'lessons': [
+                    {
+                        'order_index': 1,
+                        'title': 'How the Internet Works',
+                        'blocks': [
+                            {"type": "text", "heading": "What Is a Network?", "body": "A network is simply two or more computers connected so they can exchange data. Your home Wi-Fi is a network; the Internet is a network of networks — hundreds of thousands of smaller networks (ISPs, companies, datacenters) all agreeing to talk to each other using the same rules."},
+                            {"type": "text", "heading": "The Rules: TCP/IP", "body": "For two machines to communicate, they need shared rules: how to address each other, how to split data into pieces, how to detect errors. That family of rules is the TCP/IP protocol suite. Every device on the Internet speaks it — your phone, a server in another country, a security camera."},
+                            {"type": "text", "heading": "Packets", "body": "Data sent over a network is chopped into small chunks called packets. Each packet carries a piece of the payload plus a header — addressing information that lets routers forward it toward its destination. Packets from one message may take different paths and are reassembled at the far end."},
+                            {"type": "text", "heading": "IP Addresses", "body": "Every device on an IP network needs an address, the same way a house needs a street address. An IPv4 address is a 32-bit number, usually written as four numbers separated by dots (e.g. 192.168.1.10). The newer IPv6 uses 128 bits because the world ran out of IPv4 addresses."},
+                            {"type": "text", "heading": "Why This Matters for Security", "body": "Almost every offensive or defensive technique starts with the network: scanning for live hosts, reading packet captures, understanding which service sits behind which port. You cannot reason about attacks without a mental model of how packets move."},
+                            {"type": "practice", "command": "ip addr show", "instructions": "Run ip addr show in the terminal to see your machine's network interfaces and their IP addresses."}
+                        ],
+                        'questions': [
+                            {
+                                'order_index': 1,
+                                'question_type': 'text',
+                                'difficulty': 'easy',
+                                'prompt': 'What is the global network of interconnected networks that all communicate using the TCP/IP protocol suite called?',
+                                'answer_hash': '3b0fe0d342e9fa16a5c68dbba33f2e63c024f72a9d4c1ce1028570101d5229ff',
+                                'setup_script': None,
+                            },
+                            {
+                                'order_index': 2,
+                                'question_type': 'text',
+                                'difficulty': 'easy',
+                                'prompt': 'How many bits long is an IPv4 address?',
+                                'answer_hash': 'e29c9c180c6279b0b02abd6a1801c7c04082cf486ec027aa13515e4f3884bb6b',
+                                'setup_script': None,
+                            },
+                        ],
+                    },
+                    {
+                        'order_index': 2,
+                        'title': 'IP Addresses & the Loopback Interface',
+                        'blocks': [
+                            {"type": "text", "heading": "Anatomy of an IPv4 Address", "body": "An address like 192.168.1.10 has two parts: the network portion (which network it belongs to) and the host portion (which machine on that network). The subnet mask, e.g. 255.255.255.0, defines where the split happens. Machines on the same network can talk directly; different networks need a router between them."},
+                            {"type": "text", "heading": "Interfaces", "body": "Your machine doesn't have one IP address — each network interface has one. A physical Ethernet or Wi-Fi card is an interface, but Linux also creates virtual ones. Run ip addr show and you'll see them listed: each with a name, a hardware (MAC) address, and its IP configuration."},
+                            {"type": "text", "heading": "The Loopback Interface", "body": "Every Linux machine has a special virtual interface named lo — the loopback. Traffic sent to it never leaves the machine; it loops right back. The standard loopback IPv4 address is 127.0.0.1, known by the hostname localhost. It's how a program talks to another program on the same machine."},
+                            {"type": "text", "heading": "The 127.0.0.0/8 Range", "body": "The entire 127.x.x.x range is reserved for loopback, but 127.0.0.1 is the conventional choice. In security work you'll constantly see services bound to 127.0.0.1 — that means they're reachable only from the machine itself, never from the network. A database listening only on loopback is invisible to attackers on the network."},
+                            {"type": "text", "heading": "Private Address Ranges", "body": "Besides loopback, three ranges are reserved for private networks and are never routed on the public Internet: 10.0.0.0/8, 172.16.0.0/12, and 192.168.0.0/16. Your home router almost certainly hands out 192.168.x.x addresses. Recognizing these on sight is a basic pentest skill — they tell you what kind of network you're looking at."},
+                            {"type": "practice", "command": "ping -c 3 127.0.0.1", "instructions": "Ping the loopback address. It always answers — you're testing your own machine's network stack."}
+                        ],
+                        'questions': [
+                            {
+                                'order_index': 1,
+                                'question_type': 'terminal',
+                                'difficulty': 'easy',
+                                'prompt': 'Run ip addr show in the terminal. Which IPv4 address is assigned to the loopback interface? (just the number)',
+                                'answer_hash': '12ca17b49af2289436f303e0166030a21e525d266e209267433801a8fd4071a0',
+                                'setup_script': None,
+                            },
+                            {
+                                'order_index': 2,
+                                'question_type': 'terminal',
+                                'difficulty': 'easy',
+                                'prompt': 'Still in ip addr show output: what is the name of the loopback interface? (the short name)',
+                                'answer_hash': '9294ab38039f60d2ec53822fb46b52c663af7ea478f4d17bf43da44ede5e166c',
+                                'setup_script': None,
+                            },
+                        ],
+                    },
+                ],
+            },
+            {
+                'order_index': 2,
+                'title': 'Protocols & Ports',
+                'description': 'DNS, TCP vs UDP, and the well-known port numbers every practitioner memorizes.',
+                'lessons': [
+                    {
+                        'order_index': 1,
+                        'title': "DNS — The Internet's Phone Book",
+                        'blocks': [
+                            {"type": "text", "heading": "The Problem DNS Solves", "body": "Humans remember names; computers route by numbers. You remember example.com, but your machine needs the IP address 93.184.216.34 to connect. The Domain Name System is the distributed directory that translates one into the other — and it's one of the most-queried, most-attacked protocols on the Internet."},
+                            {"type": "text", "heading": "How a Lookup Works", "body": "When you type a hostname, your machine asks a resolver (usually your ISP's or a public one like 1.1.1.1). If the resolver doesn't have the answer cached, it walks the hierarchy: root servers point to the .com servers, which point to the domain's own nameservers, which finally return the record."},
+                            {"type": "text", "heading": "Records", "body": "DNS stores more than name-to-address mappings. The common record types: A maps a name to an IPv4 address, AAAA to IPv6, MX names the mail servers for a domain, CNAME is an alias, and TXT holds arbitrary text — often used for proving domain ownership or anti-spam policies."},
+                            {"type": "text", "heading": "DNS as an Attack Surface", "body": "Because DNS is usually allowed through every firewall, it's a favorite tunnel for attackers hiding data exfiltration inside lookups. On the recon side, enumerating a target's DNS records (subdomains, mail servers, name servers) is one of the first passive information-gathering steps in a penetration test."},
+                            {"type": "practice", "command": "nslookup example.com", "instructions": "Resolve a real domain and watch which address comes back."}
+                        ],
+                        'questions': [
+                            {
+                                'order_index': 1,
+                                'question_type': 'text',
+                                'difficulty': 'easy',
+                                'prompt': 'Which protocol translates human-readable domain names into IP addresses?',
+                                'answer_hash': 'dd75a9d6fb309c4399fe425cd5f90ff95eba135d6924fb91766ee5d3726b168a',
+                                'setup_script': None,
+                            },
+                            {
+                                'order_index': 2,
+                                'question_type': 'text',
+                                'difficulty': 'easy',
+                                'prompt': 'On which well-known port does DNS typically listen?',
+                                'answer_hash': '2858dcd1057d3eae7f7d5f782167e24b61153c01551450a628cee722509f6529',
+                                'setup_script': None,
+                            },
+                        ],
+                    },
+                    {
+                        'order_index': 2,
+                        'title': 'TCP vs UDP',
+                        'blocks': [
+                            {"type": "text", "heading": "Two Ways to Ship Data", "body": "The transport layer offers two main protocols, and choosing between them is a genuine engineering trade-off. TCP (Transmission Control Protocol) builds a connection first and guarantees delivery. UDP (User Datagram Protocol) just fires packets and hopes — no connection, no guarantees, far less overhead."},
+                            {"type": "text", "heading": "TCP: Reliable and Ordered", "body": "TCP establishes a connection with a three-way handshake (SYN, SYN-ACK, ACK), numbers every byte it sends, retransmits anything lost, and delivers data in order. Web traffic, email, and file transfers use it because a missing or scrambled byte would corrupt the result."},
+                            {"type": "text", "heading": "UDP: Fast and Cheap", "body": "UDP skips the handshake and the bookkeeping. If a video frame or a voice packet arrives late, retransmitting it is pointless — it would already be outdated. So live streaming, gaming, and VoIP prefer UDP: occasional loss is invisible, but latency is everything."},
+                            {"type": "text", "heading": "The Handshake as Recon Signal", "body": "That SYN/SYN-ACK/ACK handshake is exactly what port scanners probe. A scanner sends a SYN and listens: SYN-ACK back means the port is open, RST means closed, silence usually means a firewall dropped it. Understanding the handshake is understanding how nmap decides a port's state."},
+                            {"type": "practice", "command": "ss -tun", "instructions": "List active connections: -t shows TCP, -u shows UDP, -n shows numeric ports."}
+                        ],
+                        'questions': [
+                            {
+                                'order_index': 1,
+                                'question_type': 'text',
+                                'difficulty': 'easy',
+                                'prompt': 'Which transport protocol guarantees ordered, reliable delivery through a connection handshake?',
+                                'answer_hash': '00645195b93272275b50a6c935a23fb62e3e793e8476e83414fed0fcdfee8b41',
+                                'setup_script': None,
+                            },
+                            {
+                                'order_index': 2,
+                                'question_type': 'text',
+                                'difficulty': 'medium',
+                                'prompt': 'Video streaming services typically build on which transport protocol, accepting occasional loss for lower latency?',
+                                'answer_hash': '571e437548ffbac2cccfa26d7026aa7bd84186d79ca5ab7a5924d9026359b9e0',
+                                'setup_script': None,
+                            },
+                        ],
+                    },
+                    {
+                        'order_index': 3,
+                        'title': 'Well-Known Ports',
+                        'blocks': [
+                            {"type": "text", "heading": "Ports: Doors on a Machine", "body": "An IP address gets your packet to the right machine, but which program should receive it? Ports answer that — a 16-bit number (0–65535) attached to every packet. A web server listens on one port, a mail server on another; each conversation is tagged with a port so the operating system hands data to the right process."},
+                            {"type": "text", "heading": "The Well-Known Range", "body": "Ports 0–1023 are the well-known ports, reserved by convention for standard services: 22 SSH, 25 SMTP (mail sending), 53 DNS, 80 HTTP, 443 HTTPS, 3389 RDP. Ports 1024–49151 are registered for common applications; the rest are ephemeral — used by clients for the duration of one conversation."},
+                            {"type": "text", "heading": "Why Ports Matter for Offense", "body": "A port scan is a census of a machine's open doors. Each open port is a service, each service is software, and software has vulnerabilities. nmap's service version detection exists because knowing 'port 443 open' is less useful than knowing 'nginx 1.18 is answering on 443'."},
+                            {"type": "text", "heading": "Ports in Defense", "body": "Defenders think in ports too: a server should expose only the handful of ports its job requires, and everything else should be closed or filtered. Spotting an unexpected open port — a database on 3306 facing the Internet — is one of the highest-value findings a quick assessment can produce."},
+                            {"type": "practice", "command": "ss -tln", "instructions": "List listening TCP sockets on this machine (-l means listening) and note which ports are taken."}
+                        ],
+                        'questions': [
+                            {
+                                'order_index': 1,
+                                'question_type': 'text',
+                                'difficulty': 'easy',
+                                'prompt': 'Which port number does HTTPS use by convention?',
+                                'answer_hash': '6d05621ab7cb7b4fb796ca2ffbe1a141e0d4319d3deb6a05322b9de85d69b923',
+                                'setup_script': None,
+                            },
+                            {
+                                'order_index': 2,
+                                'question_type': 'terminal',
+                                'difficulty': 'medium',
+                                'prompt': 'Run nslookup example.com (or dig example.com) in the terminal. Which command did you use? (just the command name)',
+                                'answer_hash': '120313e8b11d8c6c1c2608c92d35c85226728b202779f48ae543f83a14b29bdd|ebbde58a4bbe357e599b29131e48c6f883a9cb7003571bf54243391a4f80aacf',
+                                'setup_script': None,
+                            },
+                        ],
+                    },
+                ],
+            },
+            {
+                'order_index': 3,
+                'title': 'Inspecting Networks on Linux',
+                'description': 'Hands-on with the tools: arp, tcpdump, ip route, and ss.',
+                'lessons': [
+                    {
+                        'order_index': 1,
+                        'title': 'The Local Segment — arp',
+                        'blocks': [
+                            {"type": "text", "heading": "The Missing Link: MAC Addresses", "body": "IP addresses get packets across the Internet, but on the final local network hop, delivery uses hardware addresses: MAC addresses. A MAC address is a 48-bit identifier burned into a network card, written as six hex pairs like aa:bb:cc:dd:ee:ff. The first three pairs identify the manufacturer."},
+                            {"type": "text", "heading": "ARP: Address Resolution", "body": "When your machine needs to send a packet to a neighbor on the same network, it broadcasts one question: 'who has 192.168.1.1?' The machine holding that IP answers with its MAC address. The questioner caches the pairing in its ARP table so it doesn't have to ask again for every packet."},
+                            {"type": "text", "heading": "Reading the ARP Table", "body": "Run ip neigh (or the older arp -n) and you'll see the neighbors your machine has actually talked to, each as an IP-to-MAC pairing with a state like REACHABLE or STALE. On a strange network, the ARP table is a quick census of who else is out there."},
+                            {"type": "text", "heading": "ARP Spoofing", "body": "ARP has no authentication — any machine can answer any ARP question. An attacker who repeatedly answers 'I have the gateway's IP' with their own MAC position themselves between the victim and the rest of the network: a man-in-the-middle. Knowing this attack exists is why you should never trust ARP tables on untrusted networks."},
+                            {"type": "practice", "command": "ip neigh", "instructions": "Show your machine's neighbor (ARP) table."}
+                        ],
+                        'questions': [
+                            {
+                                'order_index': 1,
+                                'question_type': 'text',
+                                'difficulty': 'easy',
+                                'prompt': 'How many hexadecimal digit pairs make up a MAC address?',
+                                'answer_hash': 'e7f6c011776e8db7cd330b54174fd76f7d0216b612387a5ffcfb81e6f0919683',
+                                'setup_script': None,
+                            },
+                        ],
+                    },
+                    {
+                        'order_index': 2,
+                        'title': 'Capturing Traffic — tcpdump',
+                        'blocks': [
+                            {"type": "text", "heading": "Watching the Wire", "body": "tcpdump prints a live description of every packet crossing an interface — who talked to whom, which ports, which flags. It's the standard command-line packet sniffer, present on virtually every Unix-like system, and the fastest way to answer 'is this traffic actually flowing?'"},
+                            {"type": "text", "heading": "Choosing an Interface", "body": "By default tcpdump picks the first non-loopback interface, but -i chooses explicitly: tcpdump -i eth0 watches eth0, and tcpdump -i lo watches loopback traffic — ideal for watching services talk to each other on the same machine."},
+                            {"type": "text", "heading": "Filters", "body": "tcpdump's power is its filter language: tcpdump port 443 shows only HTTPS traffic, tcpdump host 10.0.0.5 only conversations with that host, and filters combine with and/or/not. A well-chosen filter turns a firehose into a needle-finder."},
+                            {"type": "text", "heading": "Useful Flags", "body": "-c N stops the capture after N packets — perfect for scripted checks. -n disables name resolution (faster, and no DNS noise). -a prints payloads as ASCII, which makes plaintext protocols like HTTP readable right in the capture. On a switchless or wireless network where you can see others' traffic, tcpdump is also how credentials leak detection happens."},
+                            {"type": "practice", "command": "ping -c 1 127.0.0.1 & sleep 1; tcpdump -i lo -c 4", "instructions": "Capture four loopback packets — ICMP pings will show up if you background a ping first."}
+                        ],
+                        'questions': [
+                            {
+                                'order_index': 1,
+                                'question_type': 'text',
+                                'difficulty': 'medium',
+                                'prompt': 'Which tcpdump flag stops the capture automatically after a set number of packets?',
+                                'answer_hash': '0c3603e13e24a40b4bf215e3795a9a40d60a8456fb7b63c2d11e81701a231e85',
+                                'setup_script': None,
+                            },
+                            {
+                                'order_index': 2,
+                                'question_type': 'text',
+                                'difficulty': 'medium',
+                                'prompt': 'Which tcpdump flag renders packet payloads as ASCII so plaintext protocols are readable?',
+                                'answer_hash': 'c274891790345c56cef3b53c026bdc48150948fa60c56306073d6fea7766ad6a',
+                                'setup_script': None,
+                            },
+                            {
+                                'order_index': 3,
+                                'question_type': 'text',
+                                'difficulty': 'medium',
+                                'prompt': 'Which graphical tool is the standard GUI alternative to tcpdump for deep packet analysis?',
+                                'answer_hash': '28662759fcf7454b4388d4ff2798bf5c3c7dbe92090612b4214a411ea5d17cc8',
+                                'setup_script': None,
+                            },
+                        ],
+                    },
+                    {
+                        'order_index': 3,
+                        'title': 'Routes & Listening Sockets',
+                        'blocks': [
+                            {"type": "text", "heading": "The Routing Table", "body": "Your machine makes a forwarding decision for every outgoing packet: which interface, via which next hop? The kernel keeps that policy in its routing table. Run ip route and read it — one line per known destination, most specific match wins."},
+                            {"type": "text", "heading": "The Default Route", "body": "The line reading default via 172.17.0.1 dev eth0 means: anything not matching a more specific line goes to 172.17.0.1 through eth0. That gateway is usually your router or container host. 'Which interface is my default route on?' is often the first question when figuring out where a machine's traffic exits."},
+                            {"type": "text", "heading": "Listening Sockets", "body": "A server 'opens a port' by asking the kernel to listen on it. The ss command lists every socket: ss -tln shows TCP sockets in LISTEN state with numeric ports — in other words, the doors this machine currently holds open. Compare it against what should be running to spot surprises."},
+                            {"type": "text", "heading": "Why a Pentest Starts Here", "body": "Local enumeration always includes listening sockets: services bound to 0.0.0.0 are reachable from the network, ones bound to 127.0.0.1 are local-only. That single distinction often decides whether a vulnerable service is an actual finding or a dead end."},
+                            {"type": "practice", "command": "ip route && ss -tln", "instructions": "Print the routing table, then list every TCP port this machine is listening on."}
+                        ],
+                        'questions': [
+                            {
+                                'order_index': 1,
+                                'question_type': 'terminal',
+                                'difficulty': 'medium',
+                                'prompt': 'Run the ip subcommand that prints the kernel routing table. What did you type? (e.g. "ip X")',
+                                'answer_hash': 'af3ce2f82176f6ff262c67dd815d4ce6e74396c33c1887d6cffc59bfb78ef80b',
+                                'setup_script': None,
+                            },
+                            {
+                                'order_index': 2,
+                                'question_type': 'terminal',
+                                'difficulty': 'medium',
+                                'prompt': 'Look at the default line in ip route output: which device name does your traffic exit through?',
+                                'answer_hash': '9c32a8c7e59e7935b1e5d3eea04ed8e08c41c1d3da88b98a8ad15d38cfc55b00',
+                                'setup_script': None,
+                            },
+                            {
+                                'order_index': 3,
+                                'question_type': 'terminal',
+                                'difficulty': 'medium',
+                                'prompt': 'Which single command lists all listening TCP sockets with numeric port numbers? (just the command name)',
+                                'answer_hash': 'a31fe9656fc8d3a459e623dc8204e6d0268f8df56d734dac3ca3262edb5db883',
+                                'setup_script': None,
+                            },
+                        ],
+                    },
+                ],
+            },
+            {
+                'order_index': 4,
+                'title': 'The Journey of a Packet',
+                'description': 'TTL, traceroute, and what happens between two machines.',
+                'lessons': [
+                    {
+                        'order_index': 1,
+                        'title': 'TTL — The Packet Lifespan',
+                        'blocks': [
+                            {"type": "text", "heading": "The Looping Problem", "body": "Routing mistakes happen: a router configured wrong can send a packet in a circle. Without a safeguard, a lost packet would circulate forever, piling up traffic. IP solves this with a simple counter in every packet header: Time To Live, or TTL."},
+                            {"type": "text", "heading": "How TTL Works", "body": "The sender initializes TTL to a conventional value — Linux uses 64. Every router along the path decrements it by one. When a router receives a packet with TTL 1, it may not forward it: it drops the packet and sends back an ICMP 'Time Exceeded' message to the original sender."},
+                            {"type": "text", "heading": "TTL as a Fingerprint", "body": "Because each OS picks a different starting TTL (Linux 64, Windows 128, some network gear 255), the TTL of an arriving packet is a soft fingerprint of the sender's operating system: a packet arriving with TTL 62 likely started at 64 and crossed two routers. It's cheap, noisy, but surprisingly useful in triage."},
+                            {"type": "text", "heading": "The Bug That Became a Tool", "body": "That 'Time Exceeded' reply is exactly what traceroute abuses. Send a packet with TTL 1 — the first router replies. TTL 2 — the second router replies. Each increasing value maps one more hop along the path. A mistake-detection mechanism became the standard network mapping tool."},
+                            {"type": "practice", "command": "ping -c 2 1.1.1.1", "instructions": "Ping a public server and read the ttl= value in the reply — estimate how many routers the reply crossed if it started at 64."}
+                        ],
+                        'questions': [
+                            {
+                                'order_index': 1,
+                                'question_type': 'text',
+                                'difficulty': 'medium',
+                                'prompt': 'Which IPv4 header field, decremented at every router hop, prevents packets from circulating forever?',
+                                'answer_hash': 'd557c112e0f271127883f18b8f6be62db59d5fbdcbe7f546a1256e5bcdd6aafb',
+                                'setup_script': None,
+                            },
+                            {
+                                'order_index': 2,
+                                'question_type': 'text',
+                                'difficulty': 'medium',
+                                'prompt': 'What starting TTL value does Linux typically set on outgoing packets?',
+                                'answer_hash': 'a68b412c4282555f15546cf6e1fc42893b7e07f271557ceb021821098dd66c1b',
+                                'setup_script': None,
+                            },
+                        ],
+                    },
+                ],
+            },
         ],
     },
     {

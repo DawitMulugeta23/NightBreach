@@ -152,7 +152,7 @@ function DiagramConnectors({ containerRef, startRef, hubRef, specRefs, specCount
 }
 
 function LearningPaths() {
-  const { isAuthenticated } = useAuth()
+  const { isAuthenticated, user } = useAuth()
   const navigate = useNavigate()
   const [paths, setPaths] = useState([])
   const [loading, setLoading] = useState(false)
@@ -176,22 +176,32 @@ function LearningPaths() {
     if (!isAuthenticated) return
     const token = tokenStorage.get()
     if (!token) return
+    // Placement quiz first — no course content until it's done
+    if (user && user.onboarding_quiz_completed === false) {
+      navigate('/onboarding', { replace: true })
+      return
+    }
     setLoading(true)
     learningApi
       .listPaths(token)
       .then(setPaths)
       .catch((err) => toast.error(err.message || 'Failed to load learning paths'))
       .finally(() => setLoading(false))
-  }, [isAuthenticated])
+  }, [isAuthenticated, user])
 
   const handlePathClick = (path) => {
-    if (path.locked) {
-      toast('Complete all Foundation paths to unlock this one!', { icon: '🔒' })
-      return
-    }
+    // Gate order matters: auth first, then the placement quiz, then path locks
     if (!isAuthenticated) {
       toast('Please log in to start learning', { icon: '🔒' })
       return navigate('/login')
+    }
+    if (user && user.onboarding_quiz_completed === false) {
+      toast('Take the placement quiz first — it tailors your path!', { icon: '📋' })
+      return navigate('/onboarding')
+    }
+    if (path.locked) {
+      toast('Complete all Foundation paths to unlock this one!', { icon: '🔒' })
+      return
     }
     if (!path.room_count) {
       toast('No modules in this path yet. Content coming soon!', { icon: '🚧' })
