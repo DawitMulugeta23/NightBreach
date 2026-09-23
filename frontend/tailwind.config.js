@@ -14,6 +14,10 @@ export default {
           600: '#059669',
         },
       },
+      fontFamily: {
+        sans: ['"IBM Plex Sans"', 'system-ui', '-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'sans-serif'],
+        mono: ['"JetBrains Mono"', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'Consolas', 'monospace'],
+      },
     },
   },
   plugins: [],

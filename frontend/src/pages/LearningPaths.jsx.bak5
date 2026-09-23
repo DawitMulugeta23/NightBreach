@@ -66,7 +66,7 @@ const SpecCard = React.forwardRef(({ path, onClick, clicking }, ref) => {
   )
 })
 
-function DiagramConnectors({ containerRef, startRef, hubRef, specRefs, specCount, foundationRefs, foundationCount, foundationLinkColors, startToHubColor }) {
+function DiagramConnectors({ containerRef, startRef, hubRef, specRefs, specCount, foundationRefs, foundationCount }) {
   const [svgPaths, setSvgPaths] = useState({ startToHub: '', branches: [], foundationLinks: [] })
 
   useLayoutEffect(() => {
@@ -128,22 +128,16 @@ function DiagramConnectors({ containerRef, startRef, hubRef, specRefs, specCount
         <marker id="arrowRed" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
           <path d="M0,0 L10,5 L0,10 z" fill="#FF4757" />
         </marker>
-        <marker id="arrowGreen" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-          <path d="M0,0 L10,5 L0,10 z" fill="#2BD576" />
-        </marker>
         <marker id="arrowMagenta" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
           <path d="M0,0 L10,5 L0,10 z" fill="#FF2E92" />
         </marker>
       </defs>
       {svgPaths.startToHub && (
-        <path d={svgPaths.startToHub} stroke={startToHubColor} strokeWidth="4" fill="none" markerEnd={startToHubColor === "#2BD576" ? "url(#arrowGreen)" : "url(#arrowRed)"} />
+        <path d={svgPaths.startToHub} stroke="#FF4757" strokeWidth="4" fill="none" markerEnd="url(#arrowRed)" />
       )}
-      {svgPaths.foundationLinks.map((d, i) => {
-        const color = foundationLinkColors[i] || "#FF4757"
-        return (
-          <path key={`f-${i}`} d={d} stroke={color} strokeWidth="3" fill="none" markerEnd={color === "#2BD576" ? "url(#arrowGreen)" : "url(#arrowRed)"} />
-        )
-      })}
+      {svgPaths.foundationLinks.map((d, i) => (
+        <path key={`f-${i}`} d={d} stroke="#FF4757" strokeWidth="3" fill="none" markerEnd="url(#arrowRed)" />
+      ))}
       {svgPaths.branches.map((d, i) => (
         <path key={i} d={d} stroke="#FF2E92" strokeWidth="4" fill="none" strokeLinejoin="round" markerEnd="url(#arrowMagenta)" />
       ))}
@@ -236,8 +230,6 @@ function LearningPaths() {
             specCount={specializations.length}
             foundationRefs={foundationRefs}
             foundationCount={foundations.length}
-            startToHubColor="#2BD576"
-            foundationLinkColors={foundations.slice(0, -1).map((p) => (p.completed ? "#2BD576" : "#FF4757"))}
           />
 
           <div className="relative z-10 flex items-center gap-10">

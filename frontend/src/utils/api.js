@@ -1,11 +1,10 @@
 const API_BASE = '/api'
 
-export async function apiRequest(endpoint, options = {}) {
+export async function apiRequest(endpoint, options = {}, token = null) {
   const url = `${API_BASE}${endpoint}`
-  const defaultOptions = {
-    headers: { 'Content-Type': 'application/json' },
-  }
-  const response = await fetch(url, { ...defaultOptions, ...options })
+  const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) }
+  if (token) headers['Authorization'] = `Bearer ${token}`
+  const response = await fetch(url, { ...options, headers })
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}))
     throw new Error(errorData.detail || `Request failed: ${response.status}`)
@@ -24,30 +23,22 @@ export const authApi = {
       method: 'POST',
       body: JSON.stringify({ username, email, password }),
     }),
-  getCurrentUser: (token) =>
-    apiRequest(`/auth/me?token=${encodeURIComponent(token)}`),
+  getCurrentUser: (token) => apiRequest('/auth/me', {}, token),
 }
 
 export const learningApi = {
-  listPaths: (token) =>
-    apiRequest(`/learning/paths?token=${encodeURIComponent(token)}`),
-  getPath: (pathId, token) =>
-    apiRequest(`/learning/paths/${pathId}?token=${encodeURIComponent(token)}`),
-  listRoomLessons: (roomId, token) =>
-    apiRequest(`/learning/rooms/${roomId}/lessons?token=${encodeURIComponent(token)}`),
-  getLesson: (lessonId, token) =>
-    apiRequest(`/learning/lessons/${lessonId}?token=${encodeURIComponent(token)}`),
+  listPaths: (token) => apiRequest('/learning/paths', {}, token),
+  getPath: (pathId, token) => apiRequest(`/learning/paths/${pathId}`, {}, token),
+  listRoomLessons: (roomId, token) => apiRequest(`/learning/rooms/${roomId}/lessons`, {}, token),
+  getLesson: (lessonId, token) => apiRequest(`/learning/lessons/${lessonId}`, {}, token),
   startQuestion: (questionId, token) =>
-    apiRequest(`/learning/questions/${questionId}/start?token=${encodeURIComponent(token)}`, {
-      method: 'POST',
-    }),
+    apiRequest(`/learning/questions/${questionId}/start`, { method: 'POST' }, token),
   submitAnswer: (questionId, answer, token) =>
-    apiRequest(`/learning/questions/${questionId}/submit?token=${encodeURIComponent(token)}`, {
+    apiRequest(`/learning/questions/${questionId}/submit`, {
       method: 'POST',
       body: JSON.stringify({ answer }),
-    }),
-  getStats: (token) =>
-    apiRequest(`/learning/stats?token=${encodeURIComponent(token)}`),
+    }, token),
+  getStats: (token) => apiRequest('/learning/stats', {}, token),
 }
 
 export const tokenStorage = {

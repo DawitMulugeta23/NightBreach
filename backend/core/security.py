@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
+from fastapi import Header, HTTPException
 from jose import jwt, JWTError
 from passlib.context import CryptContext
 
@@ -29,3 +30,18 @@ def decode_access_token(token: str) -> str | None:
         return payload.get("sub")
     except JWTError:
         return None
+
+
+async def get_current_user_id(authorization: str | None = Header(default=None)) -> str:
+    """
+    FastAPI dependency: reads the token from the Authorization header
+    ("Bearer <token>") instead of a query-string parameter, and resolves
+    it to a user_id. Use as: user_id: str = Depends(get_current_user_id)
+    """
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Invalid or missing token")
+    token = authorization.removeprefix("Bearer ").strip()
+    user_id = decode_access_token(token)
+    if user_id is None:
+        raise HTTPException(status_code=401, detail="Invalid or missing token")
+    return user_id

@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.session import get_db
 from db.models import Level, UserProgress, ContainerStatus, User
-from core.security import decode_access_token
+from core.security import get_current_user_id
 from orchestrator.session_manager import get_or_create_session
 from orchestrator.provisioning import provision_container
 from orchestrator.terminal import get_docker_client
@@ -19,13 +19,6 @@ router = APIRouter(prefix="/levels", tags=["levels"])
 
 def _hash_flag(flag: str) -> str:
     return hashlib.sha256(flag.strip().encode()).hexdigest()
-
-
-async def _get_current_user_id(token: str) -> str:
-    user_id = decode_access_token(token)
-    if user_id is None:
-        raise HTTPException(status_code=401, detail="Invalid or missing token")
-    return user_id
 
 
 class LevelSummary(BaseModel):
@@ -50,9 +43,7 @@ class FlagSubmission(BaseModel):
 
 
 @router.get("", response_model=list[LevelSummary])
-async def list_levels(token: str, db: AsyncSession = Depends(get_db)):
-    user_id = await _get_current_user_id(token)
-
+async def list_levels(user_id: str = Depends(get_current_user_id), db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Level).order_by(Level.tier, Level.level_number))
     levels = result.scalars().all()
 
@@ -72,9 +63,7 @@ async def list_levels(token: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/{level_id}/start", response_model=LevelDetail)
-async def start_level(level_id: str, token: str, db: AsyncSession = Depends(get_db)):
-    user_id = await _get_current_user_id(token)
-
+async def start_level(level_id: str, user_id: str = Depends(get_current_user_id), db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Level).where(Level.id == level_id))
     level = result.scalar_one_or_none()
     if level is None:
@@ -121,9 +110,7 @@ async def start_level(level_id: str, token: str, db: AsyncSession = Depends(get_
 
 
 @router.post("/{level_id}/submit")
-async def submit_flag(level_id: str, token: str, payload: FlagSubmission, db: AsyncSession = Depends(get_db)):
-    user_id = await _get_current_user_id(token)
-
+async def submit_flag(level_id: str, payload: FlagSubmission, user_id: str = Depends(get_current_user_id), db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Level).where(Level.id == level_id))
     level = result.scalar_one_or_none()
     if level is None:

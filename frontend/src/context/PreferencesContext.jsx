@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react'
 
 const DEFAULTS = {
   terminalFontSize: 14,
-  terminalFontFamily: 'Menlo, Monaco, "Courier New", monospace',
+  terminalFontFamily: '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
   terminalCursorStyle: 'block',   // block | bar | underline
   terminalCursorBlink: true,
   terminalScrollback: 5000,

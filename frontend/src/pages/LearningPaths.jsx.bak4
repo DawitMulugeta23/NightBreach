@@ -15,10 +15,9 @@ function pickIcon(slug = '') {
   return 'fa-book'
 }
 
-const FoundationCard = React.forwardRef(({ path, onClick, clicking }, ref) => {
+function FoundationCard({ path, onClick, clicking }) {
   return (
     <button
-      ref={ref}
       onClick={onClick}
       disabled={clicking}
       className="group relative rounded-xl p-[1.5px] bg-gradient-to-br from-cyan-400 to-cyan-600 transition-all duration-300 hover:-translate-y-0.5 shadow-[0_0_20px_-8px_rgba(34,211,238,0.6)] disabled:opacity-60 w-full"
@@ -38,7 +37,7 @@ const FoundationCard = React.forwardRef(({ path, onClick, clicking }, ref) => {
       </div>
     </button>
   )
-})
+}
 
 const SpecCard = React.forwardRef(({ path, onClick, clicking }, ref) => {
   const isLocked = path.locked
@@ -66,8 +65,8 @@ const SpecCard = React.forwardRef(({ path, onClick, clicking }, ref) => {
   )
 })
 
-function DiagramConnectors({ containerRef, startRef, hubRef, specRefs, specCount, foundationRefs, foundationCount, foundationLinkColors, startToHubColor }) {
-  const [svgPaths, setSvgPaths] = useState({ startToHub: '', branches: [], foundationLinks: [] })
+function DiagramConnectors({ containerRef, startRef, hubRef, specRefs, specCount }) {
+  const [svgPaths, setSvgPaths] = useState({ startToHub: '', branches: [] })
 
   useLayoutEffect(() => {
     function measure() {
@@ -100,15 +99,7 @@ function DiagramConnectors({ containerRef, startRef, hubRef, specRefs, specCount
         branches.push(`M ${x0} ${y0} L ${midX} ${y0} L ${midX} ${y1} L ${x1} ${y1}`)
       })
 
-      const foundationLinks = []
-      const fRefs = foundationRefs.current.filter(Boolean)
-      for (let i = 0; i < fRefs.length - 1; i++) {
-        const a = rel(fRefs[i].getBoundingClientRect())
-        const b = rel(fRefs[i + 1].getBoundingClientRect())
-        foundationLinks.push(`M ${a.right} ${a.midY} L ${b.left} ${b.midY}`)
-      }
-
-      setSvgPaths({ startToHub, branches, foundationLinks })
+      setSvgPaths({ startToHub, branches })
     }
 
     measure()
@@ -120,7 +111,7 @@ function DiagramConnectors({ containerRef, startRef, hubRef, specRefs, specCount
       window.removeEventListener('resize', measure)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [specCount, foundationCount])
+  }, [specCount])
 
   return (
     <svg className="pointer-events-none absolute inset-0 w-full h-full" style={{ zIndex: 0 }}>
@@ -128,22 +119,13 @@ function DiagramConnectors({ containerRef, startRef, hubRef, specRefs, specCount
         <marker id="arrowRed" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
           <path d="M0,0 L10,5 L0,10 z" fill="#FF4757" />
         </marker>
-        <marker id="arrowGreen" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-          <path d="M0,0 L10,5 L0,10 z" fill="#2BD576" />
-        </marker>
         <marker id="arrowMagenta" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
           <path d="M0,0 L10,5 L0,10 z" fill="#FF2E92" />
         </marker>
       </defs>
       {svgPaths.startToHub && (
-        <path d={svgPaths.startToHub} stroke={startToHubColor} strokeWidth="4" fill="none" markerEnd={startToHubColor === "#2BD576" ? "url(#arrowGreen)" : "url(#arrowRed)"} />
+        <path d={svgPaths.startToHub} stroke="#FF4757" strokeWidth="4" fill="none" markerEnd="url(#arrowRed)" />
       )}
-      {svgPaths.foundationLinks.map((d, i) => {
-        const color = foundationLinkColors[i] || "#FF4757"
-        return (
-          <path key={`f-${i}`} d={d} stroke={color} strokeWidth="3" fill="none" markerEnd={color === "#2BD576" ? "url(#arrowGreen)" : "url(#arrowRed)"} />
-        )
-      })}
       {svgPaths.branches.map((d, i) => (
         <path key={i} d={d} stroke="#FF2E92" strokeWidth="4" fill="none" strokeLinejoin="round" markerEnd="url(#arrowMagenta)" />
       ))}
@@ -163,13 +145,8 @@ function LearningPaths() {
   const hubRef = useRef(null)
   const specRefs = useRef([])
   specRefs.current = []
-  const foundationRefs = useRef([])
-  foundationRefs.current = []
   const addSpecRef = (el) => {
     if (el && !specRefs.current.includes(el)) specRefs.current.push(el)
-  }
-  const addFoundationRef = (el) => {
-    if (el && !foundationRefs.current.includes(el)) foundationRefs.current.push(el)
   }
 
   useEffect(() => {
@@ -234,10 +211,6 @@ function LearningPaths() {
             hubRef={hubRef}
             specRefs={specRefs}
             specCount={specializations.length}
-            foundationRefs={foundationRefs}
-            foundationCount={foundations.length}
-            startToHubColor="#2BD576"
-            foundationLinkColors={foundations.slice(0, -1).map((p) => (p.completed ? "#2BD576" : "#FF4757"))}
           />
 
           <div className="relative z-10 flex items-center gap-10">
@@ -259,7 +232,6 @@ function LearningPaths() {
                 {foundations.map((path) => (
                   <FoundationCard
                     key={path.id}
-                    ref={addFoundationRef}
                     path={path}
                     clicking={clicking === path.id}
                     onClick={() => handlePathClick(path)}

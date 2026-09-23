@@ -11,9 +11,17 @@ from orchestrator.session_manager import get_or_create_session
 from orchestrator.provisioning import stop_container
 from api.terminal import router as terminal_router
 from api.auth import router as auth_router
-from api.levels import router as levels_router
-from api.lessons import router as lessons_router
 from api.learning import router as learning_router
+
+# Explicit allowlist of origins permitted to make credentialed requests.
+# Add production domains here once deployed — never use "*" with
+# allow_credentials=True; browsers reject that combination anyway, and
+# an explicit list is the only correct fix.
+ALLOWED_ORIGINS = [
+    "http://192.168.180.129:5173",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
 
 
 async def _reconcile_orphaned_containers():
@@ -35,7 +43,7 @@ app = FastAPI(title="NightBreach", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -43,8 +51,6 @@ app.add_middleware(
 
 app.include_router(terminal_router)
 app.include_router(auth_router)
-app.include_router(levels_router)
-app.include_router(lessons_router)
 app.include_router(learning_router)
 
 
@@ -57,6 +63,3 @@ async def health():
 async def health_db(db: AsyncSession = Depends(get_db)):
     result = await db.execute(text("SELECT 1"))
     return {"db_status": "ok", "result": result.scalar()}
-# test auto-deploy
-# test auto-deploy
-# test auto-deploy and check

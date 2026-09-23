@@ -16,26 +16,6 @@ RETRY_DELAY_SECONDS = 1.0
 _docker_client = docker.from_env()
 
 
-def _session_network_name(session_id) -> str:
-    return f"nb-session-{session_id}"
-
-
-def _ensure_session_network(session_id) -> str:
-    """
-    Creates an isolated (--internal) Docker network for this session if it
-    doesn't already exist. Internal networks have no route to the host or
-    external networks — only containers attached to the same network can
-    reach each other. This is what stops a sandbox from reaching the host's
-    other services (backend API, FTP, Apache, etc.) or other users' sandboxes.
-    """
-    name = _session_network_name(session_id)
-    try:
-        _docker_client.networks.get(name)
-    except NotFound:
-        _docker_client.networks.create(name, driver="bridge", internal=True)
-    return name
-
-
 async def _claim_port_with_retry(db: AsyncSession) -> int:
     for attempt in range(1, MAX_PORT_CLAIM_RETRIES + 1):
         port = await claim_port(db)
@@ -50,7 +30,6 @@ async def provision_container(
     db: AsyncSession, session: Session, username: str, command: list[str] | None = None
 ) -> Container:
     port_number = await _claim_port_with_retry(db)
-    network_name = _ensure_session_network(session.id)
 
     container_row = Container(
         session_id=session.id,
@@ -68,7 +47,6 @@ async def provision_container(
             tty=True,
             ports={CONTAINER_INTERNAL_PORT: ("127.0.0.1", port_number)},
             name=f"mde-session-{session.id}",
-            network=network_name,
             mem_limit="512m",
             nano_cpus=1_000_000_000,
             pids_limit=100,
@@ -108,24 +86,13 @@ async def stop_container(db: AsyncSession, container: Container) -> None:
             docker_container.stop(timeout=5)
             docker_container.remove()
         except NotFound:
+            # Container already gone — that's fine, just update the DB.
             pass
         except DockerException as e:
             print(f"WARNING: failed to stop/remove container {container.docker_container_id}: {e}")
 
     if container.port_number is not None:
         await release_port(db, container.port_number)
-
-    # Clean up the session's isolated network once its last container is gone.
-    try:
-        network_name = _session_network_name(container.session_id)
-        network = _docker_client.networks.get(network_name)
-        network.reload()
-        if not network.containers:
-            network.remove()
-    except NotFound:
-        pass
-    except DockerException as e:
-        print(f"WARNING: failed to clean up network for session {container.session_id}: {e}")
 
     container.status = ContainerStatus.stopped
     await db.commit()

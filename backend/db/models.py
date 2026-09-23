@@ -84,6 +84,8 @@ class User(Base):
     username: Mapped[str] = mapped_column(String, unique=True, nullable=False, index=True)
     email: Mapped[str] = mapped_column(String, unique=True, nullable=False, index=True)
     hashed_password: Mapped[str] = mapped_column(String, nullable=False)
+    progression_mode: Mapped[str] = mapped_column(String, nullable=False, server_default="strict")
+    onboarding_quiz_completed: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -184,6 +186,7 @@ class UserQuestionProgress(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     question_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("lesson_questions.id", ondelete="CASCADE"), nullable=False, index=True)
+    first_attempt_correct: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
     answered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

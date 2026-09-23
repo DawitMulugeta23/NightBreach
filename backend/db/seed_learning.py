@@ -1011,8 +1011,26 @@ SEED_DATA = [
         'rooms': [
     {
         'order_index': 1,
-        'title': 'Reconnaissance',
-        'description': 'Discovering hosts, open ports, and running services before any attack.',
+        'title': 'Cybersecurity Zero',
+        'description': 'Core principles, threat landscapes, and mindset.',
+        'lessons': [],
+    },
+    {
+        'order_index': 2,
+        'title': 'Linux Command Line',
+        'description': 'Mastering the essential hacking OS.',
+        'lessons': [],
+    },
+    {
+        'order_index': 3,
+        'title': 'Networking Essentials',
+        'description': 'Protocols, subnetting, and traffic analysis for offense.',
+        'lessons': [],
+    },
+    {
+        'order_index': 4,
+        'title': 'Recon & OSINT',
+        'description': 'Passive information gathering techniques.',
         'lessons': [
             {
                 'order_index': 1,
@@ -1045,16 +1063,37 @@ SEED_DATA = [
             },
         ],
     },
-],
+    {
+        'order_index': 5,
+        'title': 'Vulnerability Research',
+        'description': 'Finding and analyzing weaknesses.',
+        'lessons': [],
     },
     {
-        'slug': 'web-app-hacking',
-        'title': 'Web Application Hacking',
-        'description': 'Analyze and exploit OWASP Top 10 web vulnerabilities and tackle complex labs.',
-        'icon': '/webapppentest.jpg',
         'order_index': 6,
-        'rooms': [
-        ],
+        'title': 'Exploitation Frameworks',
+        'description': 'Using tools to gain access.',
+        'lessons': [],
+    },
+    {
+        'order_index': 7,
+        'title': 'Web App Pentesting',
+        'description': 'OWASP Top 10 and advanced web attacks.',
+        'lessons': [],
+    },
+    {
+        'order_index': 8,
+        'title': 'Privilege Escalation',
+        'description': 'Moving from user to admin, staying hidden.',
+        'lessons': [],
+    },
+    {
+        'order_index': 9,
+        'title': 'Advanced Red Teaming',
+        'description': 'Full-scope adversarial simulations.',
+        'lessons': [],
+    },
+],
     },
 ]
 

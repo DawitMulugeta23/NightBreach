@@ -10,9 +10,9 @@ from db.session import get_db
 from db.models import (
     LearningPath, Room, Lesson, LessonQuestion, QuestionType,
     UserQuestionProgress, UserLessonProgress, User, ContainerStatus,
+    Level, UserProgress,
 )
 from core.security import get_current_user_id
-from core.onboarding_quiz import UPGRADE_THRESHOLD, UPGRADE_WINDOW
 from orchestrator.session_manager import get_or_create_session
 from orchestrator.provisioning import provision_container
 from orchestrator.terminal import get_docker_client
@@ -29,21 +29,6 @@ async def _is_path_completed(db: AsyncSession, user_id, path_id) -> bool:
     result = await db.execute(
         select(Lesson.id).join(Room, Room.id == Lesson.room_id).where(Room.path_id == path_id)
     )
-    lesson_ids = {row[0] for row in result.all()}
-    if not lesson_ids:
-        return False
-    result = await db.execute(
-        select(UserLessonProgress.lesson_id)
-        .where(UserLessonProgress.user_id == user_id)
-        .where(UserLessonProgress.lesson_id.in_(lesson_ids))
-    )
-    completed_ids = {row[0] for row in result.all()}
-    return lesson_ids.issubset(completed_ids)
-
-
-async def _is_room_completed(db: AsyncSession, user_id, room) -> bool:
-    """True if every lesson in this room is completed by this user."""
-    result = await db.execute(select(Lesson.id).where(Lesson.room_id == room.id))
     lesson_ids = {row[0] for row in result.all()}
     if not lesson_ids:
         return False
@@ -80,7 +65,6 @@ class RoomSummary(BaseModel):
     description: str
     order_index: int
     lesson_count: int
-    locked: bool
 
 
 class PathDetail(BaseModel):
@@ -166,26 +150,13 @@ async def get_path(path_id: str, user_id: str = Depends(get_current_user_id), db
     if path is None:
         raise HTTPException(status_code=404, detail="Path not found")
 
-    result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalar_one_or_none()
-    free_mode = user is not None and user.progression_mode == "free"
-
-    sorted_rooms = sorted(path.rooms, key=lambda r: r.order_index)
-
-    rooms = []
-    prev_completed = True  # room at order_index 1 is always unlocked
-    for r in sorted_rooms:
-        if free_mode:
-            locked = False
-        else:
-            locked = not prev_completed
-        rooms.append(RoomSummary(
+    rooms = [
+        RoomSummary(
             id=str(r.id), title=r.title, description=r.description,
             order_index=r.order_index, lesson_count=len(r.lessons),
-            locked=locked,
-        ))
-        prev_completed = await _is_room_completed(db, user_id, r)
-
+        )
+        for r in path.rooms
+    ]
     return PathDetail(
         id=str(path.id), slug=path.slug, title=path.title,
         description=path.description, icon=path.icon, rooms=rooms,
@@ -351,26 +322,18 @@ async def submit_answer(
             continue
         if _hash_answer(template) in (expected_hash.split("|") if expected_hash else []):
             matched_placeholder = True
-            correct = _hash_answer(payload.answer) == _hash_answer(resolved)
-            if correct:
+            if _hash_answer(payload.answer) == _hash_answer(resolved):
                 result = await db.execute(
                     select(UserQuestionProgress)
                     .where(UserQuestionProgress.user_id == user_id)
                     .where(UserQuestionProgress.question_id == question.id)
                 )
-                existing = result.scalar_one_or_none()
-                if existing is None:
-                    db.add(UserQuestionProgress(
-                        user_id=user_id, question_id=question.id,
-                        first_attempt_correct=True,
-                    ))
+                if result.scalar_one_or_none() is None:
+                    db.add(UserQuestionProgress(user_id=user_id, question_id=question.id))
                     await db.commit()
                 await _maybe_mark_lesson_complete(db, user_id, question.lesson_id)
-                await check_auto_upgrade(db, user_id)
                 return {"correct": True}
-            else:
-                await _record_wrong_first_attempt(db, user_id, question.id)
-                return {"correct": False}
+            return {"correct": False}
 
     if matched_placeholder:
         return {"correct": False}
@@ -378,7 +341,6 @@ async def submit_answer(
     user_hash = _hash_answer(payload.answer)
     accepted = expected_hash.split("|") if expected_hash else []
     if user_hash not in accepted:
-        await _record_wrong_first_attempt(db, user_id, question.id)
         return {"correct": False}
 
     result = await db.execute(
@@ -387,101 +349,13 @@ async def submit_answer(
         .where(UserQuestionProgress.question_id == question.id)
     )
     if result.scalar_one_or_none() is None:
-        db.add(UserQuestionProgress(
-            user_id=user_id, question_id=question.id,
-            first_attempt_correct=True,
-        ))
+        db.add(UserQuestionProgress(user_id=user_id, question_id=question.id))
         await db.commit()
     await _maybe_mark_lesson_complete(db, user_id, question.lesson_id)
-    await check_auto_upgrade(db, user_id)
     return {"correct": True}
 
 
-_wrong_first_attempts: set[tuple] = set()
-
-
-async def _record_wrong_first_attempt(db: AsyncSession, user_id, question_id):
-    """
-    A question is 'first-attempt correct' only if the very first submission
-    for it was correct. If we ever see a wrong submission for a question the
-    user hasn't already answered correctly, mark that question's eventual
-    UserQuestionProgress row (when it's created) as first_attempt_correct=False.
-    Tracked in-memory per-process since a wrong attempt with no existing
-    progress row has nothing to update yet.
-    """
-    result = await db.execute(
-        select(UserQuestionProgress)
-        .where(UserQuestionProgress.user_id == user_id)
-        .where(UserQuestionProgress.question_id == question_id)
-    )
-    if result.scalar_one_or_none() is not None:
-        return  # already answered correctly previously; doesn't affect first-attempt status
-    _wrong_first_attempts.add((str(user_id), str(question_id)))
-
-
-async def check_auto_upgrade(db: AsyncSession, user_id) -> None:
-    """Algorithm 4 (spec 4.1): promote strict -> free after UPGRADE_WINDOW
-    completed rooms if first-attempt accuracy across them is >= UPGRADE_THRESHOLD."""
-    result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalar_one_or_none()
-    if user is None or user.progression_mode != "strict":
-        return
-
-    result = await db.execute(
-        select(UserLessonProgress, Lesson.room_id)
-        .join(Lesson, Lesson.id == UserLessonProgress.lesson_id)
-        .where(UserLessonProgress.user_id == user_id)
-        .order_by(UserLessonProgress.completed_at.desc())
-    )
-    rows = result.all()
-
-    seen_rooms = []
-    for _progress, room_id in rows:
-        if room_id not in seen_rooms:
-            seen_rooms.append(room_id)
-        if len(seen_rooms) >= UPGRADE_WINDOW:
-            break
-
-    if len(seen_rooms) < UPGRADE_WINDOW:
-        return
-
-    recent_room_ids = seen_rooms[:UPGRADE_WINDOW]
-
-    result = await db.execute(
-        select(Lesson.id).where(Lesson.room_id.in_(recent_room_ids))
-    )
-    lesson_ids = {row[0] for row in result.all()}
-    if not lesson_ids:
-        return
-
-    result = await db.execute(
-        select(LessonQuestion.id).where(LessonQuestion.lesson_id.in_(lesson_ids))
-    )
-    q_ids = {row[0] for row in result.all()}
-    total_questions = len(q_ids)
-    if total_questions == 0:
-        return
-
-    result = await db.execute(
-        select(UserQuestionProgress)
-        .where(UserQuestionProgress.user_id == user_id)
-        .where(UserQuestionProgress.question_id.in_(q_ids))
-    )
-    progress_rows = result.scalars().all()
-
-    first_attempt_correct_count = sum(
-        1 for p in progress_rows
-        if p.first_attempt_correct and (str(user_id), str(p.question_id)) not in _wrong_first_attempts
-    )
-
-    accuracy = first_attempt_correct_count / total_questions
-    if accuracy >= UPGRADE_THRESHOLD:
-        user.progression_mode = "free"
-        await db.commit()
-
-
 async def _maybe_mark_lesson_complete(db: AsyncSession, user_id, lesson_id):
-    """Mark lesson complete if all its questions are answered."""
     result = await db.execute(select(LessonQuestion.id).where(LessonQuestion.lesson_id == lesson_id))
     all_qids = {row[0] for row in result.all()}
     if not all_qids:
@@ -521,6 +395,7 @@ class RecentActivityItem(BaseModel):
 
 class DashboardStats(BaseModel):
     lessons_completed: int
+    levels_completed: int
     questions_answered: int
     total_score: int
     recent_activity: list[RecentActivityItem]
@@ -534,11 +409,16 @@ async def get_dashboard_stats(user_id: str = Depends(get_current_user_id), db: A
     lessons_completed = result.scalar_one()
 
     result = await db.execute(
+        select(func.count()).select_from(UserProgress).where(UserProgress.user_id == user_id)
+    )
+    levels_completed = result.scalar_one()
+
+    result = await db.execute(
         select(func.count()).select_from(UserQuestionProgress).where(UserQuestionProgress.user_id == user_id)
     )
     questions_answered = result.scalar_one()
 
-    total_score = lessons_completed * 10 + questions_answered * 2
+    total_score = lessons_completed * 10 + levels_completed * 20 + questions_answered * 2
 
     result = await db.execute(
         select(UserLessonProgress.completed_at, Lesson.title)
@@ -547,13 +427,28 @@ async def get_dashboard_stats(user_id: str = Depends(get_current_user_id), db: A
         .order_by(UserLessonProgress.completed_at.desc())
         .limit(5)
     )
-    recent = [
+    lesson_events = [
         RecentActivityItem(type="lesson", title=title, completed_at=completed_at.isoformat())
         for completed_at, title in result.all()
     ]
 
+    result = await db.execute(
+        select(UserProgress.completed_at, Level.title)
+        .join(Level, Level.id == UserProgress.level_id)
+        .where(UserProgress.user_id == user_id)
+        .order_by(UserProgress.completed_at.desc())
+        .limit(5)
+    )
+    level_events = [
+        RecentActivityItem(type="level", title=title, completed_at=completed_at.isoformat())
+        for completed_at, title in result.all()
+    ]
+
+    recent = sorted(lesson_events + level_events, key=lambda x: x.completed_at, reverse=True)[:5]
+
     return DashboardStats(
         lessons_completed=lessons_completed,
+        levels_completed=levels_completed,
         questions_answered=questions_answered,
         total_score=total_score,
         recent_activity=recent,

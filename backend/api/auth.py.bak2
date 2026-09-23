@@ -92,7 +92,6 @@ async def get_current_user(user_id: str = Depends(get_current_user_id), db: Asyn
         "username": user.username,
         "email": user.email,
         "progression_mode": user.progression_mode,
-        "onboarding_quiz_completed": user.onboarding_quiz_completed,
     }
 
 
@@ -114,7 +113,6 @@ async def submit_onboarding_quiz(
 
     score = score_answers(payload.answers)
     user.progression_mode = "free" if score >= FREE_MODE_THRESHOLD else "strict"
-    user.onboarding_quiz_completed = True
     await db.commit()
 
     return QuizResult(score=score, progression_mode=user.progression_mode)

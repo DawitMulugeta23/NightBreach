@@ -15,12 +15,13 @@ from orchestrator.teardown_registry import schedule_teardown, cancel_teardown
 router = APIRouter()
 
 TEARDOWN_GRACE_SECONDS = 60
+IDLE_TIMEOUT_SECONDS = 20 * 60  # 20 minutes of no keystrokes → server closes the session
 
 # How long a connected-but-idle WebSocket (no keystrokes) is allowed to sit
 # before we close it ourselves and let the normal teardown path reclaim the
-# container/port. Resets on every real message received — a quietly-running
-# long command doesn't count as idle, only genuine inactivity does.
-IDLE_TIMEOUT_SECONDS = 20 * 60  # 20 minutes
+# container/port. This is separate from TEARDOWN_GRACE_SECONDS, which only
+# covers the window after a real disconnect.
+IDLE_TIMEOUT_SECONDS = 15 * 60  # 15 minutes
 
 _docker_client = docker.from_env()
 
@@ -49,10 +50,12 @@ async def _get_or_provision_running_container(db, session, username):
         if c.status == ContainerStatus.running:
             if _container_still_exists(c.docker_container_id):
                 return c
+            # Stale DB row — container no longer exists in Docker
             print(f"WARNING: container {c.docker_container_id[:12] if c.docker_container_id else '?'} "
                   f"marked running but missing in Docker; cleaning up")
             await stop_container(db, c)
 
+    # No valid running container — provision a new one
     return await provision_container(db, session, username)
 
 
@@ -82,6 +85,25 @@ async def websocket_terminal(websocket: WebSocket, token: str):
 
     cancel_teardown(str(session.id))
 
+    last_activity = {"t": loop.time()}
+    idle_watchdog_stop = asyncio.Event()
+
+    async def idle_watchdog():
+        """Closes the socket if the user hasn't typed anything in IDLE_TIMEOUT_SECONDS.
+        Only counts inbound keystrokes as activity — a quietly-running long command
+        doesn't count as idle, but a forgotten open tab does."""
+        try:
+            while not idle_watchdog_stop.is_set():
+                await asyncio.sleep(30)
+                if loop.time() - last_activity["t"] > IDLE_TIMEOUT_SECONDS:
+                    print(f"IDLE TIMEOUT: closing session {session.id} after {IDLE_TIMEOUT_SECONDS}s of inactivity")
+                    await websocket.close(code=4408)
+                    return
+        except Exception:
+            pass
+
+    watchdog_task = asyncio.create_task(idle_watchdog())
+
     try:
         sock = await loop.run_in_executor(
             None, create_exec_socket, container.docker_container_id, username
@@ -89,6 +111,8 @@ async def websocket_terminal(websocket: WebSocket, token: str):
     except Exception as e:
         print(f"ERROR: create_exec_socket failed for {container.docker_container_id}: {e}")
         await websocket.send_text(f"\r\n\x1b[31mFailed to attach to container: {e}\x1b[0m\r\n")
+        idle_watchdog_stop.set()
+        watchdog_task.cancel()
         await websocket.close()
         return
 

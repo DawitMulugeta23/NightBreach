@@ -1,0 +1,168 @@
+import React, { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
+import toast from 'react-hot-toast'
+import { learningApi, tokenStorage } from '../utils/api'
+import { useAuth } from '../context/AuthContext'
+import LoadingSpinner from '../components/LoadingSpinner'
+
+// Icons keyed by slug prefix — falls back to a generic icon if unmatched.
+function pickIcon(slug = '') {
+  if (slug.includes('linux')) return 'fa-terminal'
+  if (slug.includes('network')) return 'fa-network-wired'
+  if (slug.includes('cyber') || slug.includes('fundamental')) return 'fa-shield-halved'
+  if (slug.includes('defensive')) return 'fa-shield-cat'
+  if (slug.includes('offensive')) return 'fa-crosshairs'
+  if (slug.includes('web')) return 'fa-code'
+  return 'fa-book'
+}
+
+function PathCard({ path, accent, onClick, clicking }) {
+  const isLocked = path.locked
+  const colors = accent === 'magenta'
+    ? {
+        border: 'from-fuchsia-400 via-fuchsia-500 to-cyan-500',
+        glow: 'shadow-[0_0_35px_-8px_rgba(232,121,249,0.6)]',
+        iconBg: 'bg-gradient-to-br from-fuchsia-500/20 to-cyan-500/20',
+        iconText: 'text-fuchsia-300',
+        title: 'text-fuchsia-100',
+        link: 'text-fuchsia-300',
+      }
+    : {
+        border: 'from-cyan-400 via-cyan-500 to-fuchsia-500',
+        glow: 'shadow-[0_0_35px_-8px_rgba(34,211,238,0.6)]',
+        iconBg: 'bg-gradient-to-br from-cyan-500/20 to-fuchsia-500/20',
+        iconText: 'text-cyan-300',
+        title: 'text-cyan-100',
+        link: 'text-cyan-300',
+      }
+
+  return (
+    <button
+      onClick={onClick}
+      disabled={clicking || isLocked}
+      className={`group relative rounded-2xl p-[2px] bg-gradient-to-br ${colors.border} transition-all duration-300 hover:-translate-y-1 disabled:opacity-60 ${colors.glow} ${clicking ? 'opacity-50' : ''}`}
+    >
+      <div className="relative rounded-[14px] bg-neutral-950/95 backdrop-blur-sm p-5 h-full text-left">
+        <div className="flex items-start gap-4">
+          <div className={`shrink-0 w-16 h-16 rounded-xl flex items-center justify-center ${colors.iconBg}`}>
+            <i className={`fas ${isLocked ? 'fa-lock' : pickIcon(path.slug)} text-2xl ${colors.iconText}`}></i>
+          </div>
+          <div className="min-w-0 flex-1">
+            <h3 className={`font-bold text-base leading-tight mb-1 ${colors.title}`}>
+              {path.title}
+            </h3>
+            <p className="text-xs text-neutral-400 leading-snug mb-3 line-clamp-2">
+              {path.description}
+            </p>
+            <span className={`text-xs font-semibold inline-flex items-center gap-1.5 ${isLocked ? 'text-neutral-500' : colors.link}`}>
+              {isLocked
+                ? 'Complete Foundations to unlock'
+                : clicking ? '...' : `${path.room_count} module${path.room_count === 1 ? '' : 's'} — Explore`}
+              {!isLocked && !clicking && <i className="fas fa-arrow-right text-[10px]"></i>}
+            </span>
+          </div>
+        </div>
+      </div>
+    </button>
+  )
+}
+
+function LearningPaths() {
+  const { isAuthenticated } = useAuth()
+  const navigate = useNavigate()
+  const [paths, setPaths] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [clicking, setClicking] = useState(null)
+
+  useEffect(() => {
+    if (!isAuthenticated) return
+    const token = tokenStorage.get()
+    if (!token) return
+    setLoading(true)
+    learningApi
+      .listPaths(token)
+      .then(setPaths)
+      .catch((err) => toast.error(err.message || 'Failed to load learning paths'))
+      .finally(() => setLoading(false))
+  }, [isAuthenticated])
+
+  const handlePathClick = async (path) => {
+    if (path.locked) {
+      toast('Complete all Foundation paths to unlock this one!', { icon: '🔒' })
+      return
+    }
+    if (!isAuthenticated) {
+      toast('Please log in to start learning', { icon: '🔒' })
+      return navigate('/login')
+    }
+    if (!path.room_count) {
+      toast('No modules in this path yet. Content coming soon!', { icon: '🚧' })
+      return
+    }
+    setClicking(path.id)
+    navigate(`/learning/paths/${path.id}`)
+  }
+
+  const foundations = paths.filter((p) => p.tier === 'foundations').sort((a, b) => a.order_index - b.order_index)
+  const specializations = paths.filter((p) => p.tier === 'specializations').sort((a, b) => a.order_index - b.order_index)
+
+  return (
+    <div className="relative w-full min-h-screen px-4 sm:px-6 md:px-8 py-10 md:py-14 overflow-hidden bg-neutral-950 text-neutral-100">
+      <div
+        className="pointer-events-none absolute inset-0 opacity-[0.15]"
+        style={{
+          backgroundImage:
+            'linear-gradient(rgba(34,211,238,0.15) 1px, transparent 1px), linear-gradient(90deg, rgba(34,211,238,0.15) 1px, transparent 1px)',
+          backgroundSize: '48px 48px',
+        }}
+      />
+      <div className="pointer-events-none absolute -top-32 -left-32 w-96 h-96 rounded-full bg-cyan-500/10 blur-3xl" />
+      <div className="pointer-events-none absolute -bottom-32 -right-32 w-96 h-96 rounded-full bg-fuchsia-500/10 blur-3xl" />
+
+      <div className="relative max-w-6xl mx-auto">
+        <div className="text-center mb-14">
+          <h1 className="text-3xl md:text-5xl font-extrabold uppercase tracking-wider text-white mb-3">
+            Learning <span className="text-cyan-400">Paths</span>
+          </h1>
+          <p className="text-neutral-400 text-sm md:text-base">
+            Master the Foundations, then choose your specialization.
+          </p>
+        </div>
+
+        {loading && <LoadingSpinner message="Loading paths..." />}
+
+        {!loading && (
+          <>
+            <h2 className="text-sm font-bold uppercase tracking-widest text-cyan-400 mb-4">Foundations</h2>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
+              {foundations.map((path) => (
+                <PathCard
+                  key={path.id}
+                  path={path}
+                  accent="cyan"
+                  clicking={clicking === path.id}
+                  onClick={() => handlePathClick(path)}
+                />
+              ))}
+            </div>
+
+            <h2 className="text-sm font-bold uppercase tracking-widest text-fuchsia-400 mb-4">Specializations</h2>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {specializations.map((path) => (
+                <PathCard
+                  key={path.id}
+                  path={path}
+                  accent="magenta"
+                  clicking={clicking === path.id}
+                  onClick={() => handlePathClick(path)}
+                />
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+export default LearningPaths
