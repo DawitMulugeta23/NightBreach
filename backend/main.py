@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.session import get_db, AsyncSessionLocal
 from db.models import Container, ContainerStatus
+from db.seed_learning import seed_on_startup
 from orchestrator.session_manager import get_or_create_session
 from orchestrator.provisioning import stop_container
 from api.terminal import router as terminal_router
@@ -64,6 +65,7 @@ async def _reconcile_orphaned_containers():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await _ensure_schema_safety_net()
+    await seed_on_startup()  # content deploy == code deploy: fill missing rooms/lessons
     await _reconcile_orphaned_containers()
     yield
 
