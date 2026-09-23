@@ -41,6 +41,12 @@ export const learningApi = {
   getStats: (token) => apiRequest('/learning/stats', {}, token),
 }
 
+export const arenaApi = {
+  getStatus: (token) => apiRequest('/learning/arena/status', {}, token),
+  start: (token) => apiRequest('/learning/arena/start', { method: 'POST' }, token),
+  stop: (token) => apiRequest('/learning/arena/stop', { method: 'POST' }, token),
+}
+
 export const onboardingApi = {
   getQuiz: () => apiRequest('/auth/onboarding-quiz'),
   // wantsStrict: the answer to "Do you want a strict path?" (true = yes).

@@ -15,7 +15,7 @@ from db.models import (
 from core.security import get_current_user_id
 from core.onboarding_quiz import UPGRADE_THRESHOLD, UPGRADE_WINDOW
 from orchestrator.session_manager import get_or_create_session
-from orchestrator.provisioning import provision_container
+from orchestrator.provisioning import provision_container, stop_container
 from orchestrator.terminal import get_docker_client
 
 _docker_client = get_docker_client()
@@ -127,6 +127,92 @@ class LessonDetail(BaseModel):
 
 class AnswerSubmission(BaseModel):
     answer: str
+
+
+# ---- Arena (standalone sandbox) ----
+
+class ArenaStatusResponse(BaseModel):
+    active: bool
+    image: str | None = None
+    started_at: str | None = None
+
+
+def _docker_container_exists(container_id: str | None) -> bool:
+    """True only if Docker still knows about this container."""
+    if not container_id:
+        return False
+    try:
+        _docker_client.containers.get(container_id)
+        return True
+    except Exception:
+        return False
+
+
+async def _get_running_container(db: AsyncSession, session):
+    """The session's running container row if it still exists in Docker, else None."""
+    for c in session.containers:
+        if c.status == ContainerStatus.running and _docker_container_exists(c.docker_container_id):
+            return c
+    return None
+
+
+@router.get("/arena/status", response_model=ArenaStatusResponse)
+async def arena_status(
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    session = await get_or_create_session(db, user_id)
+    container = await _get_running_container(db, session)
+    if container is None:
+        return ArenaStatusResponse(active=False)
+    return ArenaStatusResponse(
+        active=True,
+        image=container.image,
+        started_at=container.created_at.isoformat() if container.created_at else None,
+    )
+
+
+@router.post("/arena/start")
+async def arena_start(
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    session = await get_or_create_session(db, user_id)
+
+    # Idempotent: reuse the running container if one already exists.
+    existing = await _get_running_container(db, session)
+    if existing is not None:
+        return {"active": True, "message": "Sandbox already running"}
+
+    # Clean up stale rows (marked running but missing in Docker) so provisioning
+    # doesn't collide with an orphaned port claim.
+    for c in session.containers:
+        if c.status == ContainerStatus.running:
+            await stop_container(db, c)
+    await db.refresh(session)
+
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    username = user.username if user else "player"
+
+    try:
+        await provision_container(db, session, username)
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+    return {"active": True, "message": "Sandbox started"}
+
+
+@router.post("/arena/stop")
+async def arena_stop(
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    session = await get_or_create_session(db, user_id)
+    for c in session.containers:
+        if c.status == ContainerStatus.running:
+            await stop_container(db, c)
+    return {"active": False, "message": "Sandbox stopped"}
 
 
 # ---- Endpoints ----
