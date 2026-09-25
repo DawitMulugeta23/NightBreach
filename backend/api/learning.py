@@ -29,6 +29,12 @@ FOUNDATION_SLUGS = {
     "windows-fundamentals",  # Windows course — foundation tier like Linux/Networking
 }
 
+# Content gating is temporarily OFF: every specialization path and every room is
+# open to all users. The Foundations gate and the sequential room lock come back
+# the moment paid tiers land — flip this to True (payment feature) and both
+# gates below re-activate without further code changes.
+GATING_ENABLED = False
+
 
 async def _is_path_completed(db: AsyncSession, user_id, path_id) -> bool:
     """True if every lesson in every room of this path is completed by this user."""
@@ -240,7 +246,11 @@ async def list_paths(user_id: str = Depends(get_current_user_id), db: AsyncSessi
             id=str(p.id), slug=p.slug, title=p.title, description=p.description,
             icon=p.icon, order_index=p.order_index, room_count=len(p.rooms),
             tier=("foundations" if p.slug in FOUNDATION_SLUGS else "specializations"),
-            locked=(p.slug not in FOUNDATION_SLUGS and not foundations_done),
+            locked=(
+                GATING_ENABLED
+                and p.slug not in FOUNDATION_SLUGS
+                and not foundations_done
+            ),
             completed=path_completed[p.id],
         )
         for p in paths
@@ -267,7 +277,7 @@ async def get_path(path_id: str, user_id: str = Depends(get_current_user_id), db
     rooms = []
     prev_completed = True  # room at order_index 1 is always unlocked
     for r in sorted_rooms:
-        if free_mode:
+        if free_mode or not GATING_ENABLED:
             locked = False
         else:
             locked = not prev_completed
