@@ -1,12 +1,18 @@
-from fastapi.testclient import TestClient
+import pytest
+from httpx import ASGITransport, AsyncClient
 
 from app.main import app
 
 
-def test_health() -> None:
-    client = TestClient(app)
+@pytest.mark.asyncio
+async def test_health() -> None:
+    transport = ASGITransport(app=app)
 
-    response = client.get("/api/v1/health")
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+    ) as client:
+        response = await client.get("/api/v1/health")
 
     assert response.status_code == 200
     assert response.json() == {

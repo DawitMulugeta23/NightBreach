@@ -32,7 +32,7 @@ def create_access_token(
     now = datetime.now(timezone.utc)
 
     if expires_delta is None:
-        expires_delta = timedelta(minutes=30)
+        expires_delta = timedelta(hours=24)
 
     payload: dict[str, Any] = {
         "sub": subject,
