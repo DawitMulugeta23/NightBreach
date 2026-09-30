@@ -6,11 +6,16 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import delete, select
+from sqlalchemy.orm import selectinload
 
 from app.db.session import AsyncSessionLocal
 from app.domains.sandbox.dependencies import get_runtime_provider
 from app.main import app
-from app.models.sandbox import Environment, EnvironmentState
+from app.models.sandbox import (
+    Environment,
+    EnvironmentMachine,
+    EnvironmentState,
+)
 from app.models.user import User
 from sandbox_test_helpers import FakeRuntime
 
@@ -361,3 +366,821 @@ async def test_environment_ownership_is_enforced(
             delete(User).where(User.id == other_user_id)
         )
         await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_terminate_environment_cleans_runtime_and_persists_destroyed(
+    client,
+    auth_headers,
+    runtime,
+):
+    headers = headers_only(auth_headers)
+
+    create_response = await client.post(
+        "/api/v1/sandbox/environments",
+        headers=headers,
+        json={"activity_id": "api-sandbox-terminate"},
+    )
+
+    assert create_response.status_code == 201, create_response.text
+
+    environment_id = create_response.json()["id"]
+
+    provision_response = await client.post(
+        f"/api/v1/sandbox/environments/{environment_id}/provision",
+        headers=headers,
+        json=provision_payload(),
+    )
+
+    assert provision_response.status_code == 200, provision_response.text
+    assert provision_response.json()["state"] == "ready"
+
+    old_machine_ids = set(runtime.machines)
+    old_network_ids = set(runtime.networks)
+
+    terminate_response = await client.post(
+        f"/api/v1/sandbox/environments/{environment_id}/terminate",
+        headers=headers,
+    )
+
+    assert terminate_response.status_code == 200, terminate_response.text
+
+    terminated = terminate_response.json()
+
+    assert terminated["id"] == environment_id
+    assert terminated["state"] == "destroyed"
+    assert terminated["state_version"] == 5
+
+    assert runtime.machines == {}
+    assert runtime.networks == {}
+
+    assert old_machine_ids.issubset(
+        set(runtime.removed_machines)
+    )
+    assert old_network_ids.issubset(
+        set(runtime.removed_networks)
+    )
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Environment)
+            .options(
+                selectinload(Environment.networks),
+                selectinload(Environment.machines).selectinload(
+                    EnvironmentMachine.interfaces
+                ),
+            )
+            .where(
+                Environment.id == UUID(environment_id)
+            )
+        )
+        environment = result.scalar_one()
+
+        assert environment.state == EnvironmentState.DESTROYED
+        assert environment.state_version == 5
+
+        for machine in environment.machines:
+            assert machine.runtime_machine_id is None
+
+        for network in environment.networks:
+            assert network.runtime_network_id is None
+
+
+@pytest.mark.asyncio
+async def test_destroyed_environment_cannot_be_terminated_again(
+    client,
+    auth_headers,
+    runtime,
+):
+    headers = headers_only(auth_headers)
+
+    create_response = await client.post(
+        "/api/v1/sandbox/environments",
+        headers=headers,
+        json={"activity_id": "api-sandbox-double-terminate"},
+    )
+
+    assert create_response.status_code == 201, create_response.text
+
+    environment_id = create_response.json()["id"]
+
+    provision_response = await client.post(
+        f"/api/v1/sandbox/environments/{environment_id}/provision",
+        headers=headers,
+        json=provision_payload(),
+    )
+
+    assert provision_response.status_code == 200, provision_response.text
+
+    first_response = await client.post(
+        f"/api/v1/sandbox/environments/{environment_id}/terminate",
+        headers=headers,
+    )
+
+    assert first_response.status_code == 200, first_response.text
+    assert first_response.json()["state"] == "destroyed"
+
+    second_response = await client.post(
+        f"/api/v1/sandbox/environments/{environment_id}/terminate",
+        headers=headers,
+    )
+
+    assert second_response.status_code >= 400
+
+
+@pytest.mark.asyncio
+async def test_validate_provisioned_environment(
+    client,
+    auth_headers,
+    runtime,
+):
+    headers = headers_only(auth_headers)
+
+    create_response = await client.post(
+        "/api/v1/sandbox/environments",
+        headers=headers,
+        json={"activity_id": "api-sandbox-validation"},
+    )
+
+    assert create_response.status_code == 201, create_response.text
+
+    environment_id = create_response.json()["id"]
+
+    provision_response = await client.post(
+        f"/api/v1/sandbox/environments/{environment_id}/provision",
+        headers=headers,
+        json=provision_payload(),
+    )
+
+    assert provision_response.status_code == 200, provision_response.text
+    assert provision_response.json()["state"] == "ready"
+
+    response = await client.post(
+        f"/api/v1/sandbox/environments/{environment_id}/validate",
+        headers=headers,
+    )
+
+    assert response.status_code == 200, response.text
+
+    data = response.json()
+
+    assert data["environment_id"] == environment_id
+    assert data["valid"] is True
+    assert data["errors"] == []
+
+
+@pytest.mark.asyncio
+async def test_validate_detects_stopped_runtime_machine(
+    client,
+    auth_headers,
+    runtime,
+):
+    headers = headers_only(auth_headers)
+
+    create_response = await client.post(
+        "/api/v1/sandbox/environments",
+        headers=headers,
+        json={"activity_id": "api-sandbox-validation-stopped"},
+    )
+
+    assert create_response.status_code == 201, create_response.text
+
+    environment_id = create_response.json()["id"]
+
+    provision_response = await client.post(
+        f"/api/v1/sandbox/environments/{environment_id}/provision",
+        headers=headers,
+        json=provision_payload(),
+    )
+
+    assert provision_response.status_code == 200, provision_response.text
+
+    machine_id = next(iter(runtime.machines))
+    runtime.machines[machine_id].running = False
+
+    response = await client.post(
+        f"/api/v1/sandbox/environments/{environment_id}/validate",
+        headers=headers,
+    )
+
+    assert response.status_code == 200, response.text
+
+    data = response.json()
+
+    assert data["valid"] is False
+    assert any(
+        "is not running" in error
+        for error in data["errors"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_validation_does_not_change_environment_state(
+    client,
+    auth_headers,
+    runtime,
+):
+    headers = headers_only(auth_headers)
+
+    create_response = await client.post(
+        "/api/v1/sandbox/environments",
+        headers=headers,
+        json={"activity_id": "api-sandbox-validation-state"},
+    )
+
+    assert create_response.status_code == 201, create_response.text
+
+    environment_id = create_response.json()["id"]
+
+    provision_response = await client.post(
+        f"/api/v1/sandbox/environments/{environment_id}/provision",
+        headers=headers,
+        json=provision_payload(),
+    )
+
+    assert provision_response.status_code == 200, provision_response.text
+
+    before = provision_response.json()
+
+    response = await client.post(
+        f"/api/v1/sandbox/environments/{environment_id}/validate",
+        headers=headers,
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["valid"] is True
+
+    after_response = await client.get(
+        f"/api/v1/sandbox/environments/{environment_id}",
+        headers=headers,
+    )
+
+    assert after_response.status_code == 200, after_response.text
+
+    after = after_response.json()
+
+    assert after["state"] == before["state"]
+    assert after["state_version"] == before["state_version"]
+
+@pytest.mark.asyncio
+async def test_validate_detects_runtime_network_attachment_drift(
+    client,
+    auth_headers,
+    runtime,
+):
+    headers = headers_only(auth_headers)
+
+    create_response = await client.post(
+        "/api/v1/sandbox/environments",
+        headers=headers,
+        json={"activity_id": "validation-network-drift"},
+    )
+    assert create_response.status_code == 201, create_response.text
+
+    environment_id = create_response.json()["id"]
+
+    provision_response = await client.post(
+        f"/api/v1/sandbox/environments/{environment_id}/provision",
+        headers=headers,
+        json=provision_payload(),
+    )
+    assert provision_response.status_code == 200, provision_response.text
+
+    machine_id = next(iter(runtime.machines))
+    machine = runtime.machines[machine_id]
+
+    machine.network_attachments = []
+
+    response = await client.post(
+        f"/api/v1/sandbox/environments/{environment_id}/validate",
+        headers=headers,
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+
+    assert body["valid"] is False
+    assert any(
+        "is not attached to runtime network" in error
+        for error in body["errors"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_validate_detects_runtime_address_drift(
+    client,
+    auth_headers,
+    runtime,
+):
+    headers = headers_only(auth_headers)
+
+    create_response = await client.post(
+        "/api/v1/sandbox/environments",
+        headers=headers,
+        json={"activity_id": "validation-address-drift"},
+    )
+    assert create_response.status_code == 201, create_response.text
+
+    environment_id = create_response.json()["id"]
+
+    provision_response = await client.post(
+        f"/api/v1/sandbox/environments/{environment_id}/provision",
+        headers=headers,
+        json=provision_payload(),
+    )
+    assert provision_response.status_code == 200, provision_response.text
+
+    machine_id = next(iter(runtime.machines))
+    machine = runtime.machines[machine_id]
+
+    attachment = machine.network_attachments[0]
+    machine.network_attachments = [
+        type(attachment)(
+            network_id=attachment.network_id,
+            ipv4_address="172.30.0.99",
+        )
+    ]
+
+    response = await client.post(
+        f"/api/v1/sandbox/environments/{environment_id}/validate",
+        headers=headers,
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+
+    assert body["valid"] is False
+    assert any(
+        "has runtime address" in error
+        for error in body["errors"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_validate_detects_missing_runtime_network(client, runtime, auth_headers):
+    create_response = await client.post(
+        "/api/v1/sandbox/environments",
+        headers=headers_only(auth_headers),
+        json={"activity_id": "validation-missing-network"},
+    )
+    assert create_response.status_code == 201
+    environment_id = create_response.json()["id"]
+
+    provision_response = await client.post(
+        f"/api/v1/sandbox/environments/{environment_id}/provision",
+        headers=headers_only(auth_headers),
+        json=provision_payload(),
+    )
+    assert provision_response.status_code == 200
+
+    network_id = next(iter(runtime.networks))
+    runtime.networks.pop(network_id)
+
+    validation_response = await client.post(
+        f"/api/v1/sandbox/environments/{environment_id}/validate",
+        headers=headers_only(auth_headers),
+    )
+
+    assert validation_response.status_code == 200
+    body = validation_response.json()
+    assert body["valid"] is False
+    assert any("could not be inspected" in error for error in body["errors"])
+
+
+@pytest.mark.asyncio
+async def test_validate_detects_missing_runtime_machine(client, runtime, auth_headers):
+    create_response = await client.post(
+        "/api/v1/sandbox/environments",
+        headers=headers_only(auth_headers),
+        json={"activity_id": "validation-missing-machine"},
+    )
+    assert create_response.status_code == 201
+    environment_id = create_response.json()["id"]
+
+    provision_response = await client.post(
+        f"/api/v1/sandbox/environments/{environment_id}/provision",
+        headers=headers_only(auth_headers),
+        json=provision_payload(),
+    )
+    assert provision_response.status_code == 200
+
+    machine_id = next(iter(runtime.machines))
+    runtime.machines.pop(machine_id)
+
+    validation_response = await client.post(
+        f"/api/v1/sandbox/environments/{environment_id}/validate",
+        headers=headers_only(auth_headers),
+    )
+
+    assert validation_response.status_code == 200
+    body = validation_response.json()
+    assert body["valid"] is False
+    assert any("could not be inspected" in error for error in body["errors"])
+
+@pytest.mark.asyncio
+async def test_validate_detects_machine_without_interfaces(
+    client,
+    runtime,
+    auth_headers,
+):
+    create_response = await client.post(
+        "/api/v1/sandbox/environments",
+        headers=headers_only(auth_headers),
+        json={"activity_id": "validation-no-interfaces"},
+    )
+    assert create_response.status_code == 201
+    environment_id = create_response.json()["id"]
+
+    provision_response = await client.post(
+        f"/api/v1/sandbox/environments/{environment_id}/provision",
+        headers=headers_only(auth_headers),
+        json=provision_payload(),
+    )
+    assert provision_response.status_code == 200
+
+    from sqlalchemy import delete, select
+    from app.db.session import AsyncSessionLocal
+    from app.models.sandbox import EnvironmentMachine, MachineInterface
+
+    async with AsyncSessionLocal() as session:
+        machine_result = await session.execute(
+            select(EnvironmentMachine.id)
+            .where(
+                EnvironmentMachine.environment_id == UUID(environment_id)
+            )
+            .order_by(EnvironmentMachine.name)
+        )
+        machine_id = machine_result.scalars().first()
+        assert machine_id is not None
+
+        await session.execute(
+            delete(MachineInterface).where(
+                MachineInterface.machine_id == machine_id
+            )
+        )
+        await session.commit()
+
+    validation_response = await client.post(
+        f"/api/v1/sandbox/environments/{environment_id}/validate",
+        headers=headers_only(auth_headers),
+    )
+
+    assert validation_response.status_code == 200
+    body = validation_response.json()
+    assert body["valid"] is False
+    assert any("has no interfaces" in error for error in body["errors"])
+
+
+
+
+@pytest.mark.asyncio
+async def test_validate_detects_unknown_interface_network(
+    client,
+    runtime,
+    auth_headers,
+):
+    create_response = await client.post(
+        "/api/v1/sandbox/environments",
+        headers=headers_only(auth_headers),
+        json={"activity_id": "validation-invalid-network"},
+    )
+    assert create_response.status_code == 201
+    environment_id = create_response.json()["id"]
+
+    provision_response = await client.post(
+        f"/api/v1/sandbox/environments/{environment_id}/provision",
+        headers=headers_only(auth_headers),
+        json=provision_payload(),
+    )
+    assert provision_response.status_code == 200
+
+    from sqlalchemy import select, update
+    from app.db.session import AsyncSessionLocal
+    from app.models.sandbox import (
+        Environment,
+        EnvironmentMachine,
+        EnvironmentNetwork,
+        MachineInterface,
+    )
+
+    async with AsyncSessionLocal() as session:
+        environment_result = await session.execute(
+            select(Environment).where(
+                Environment.id == UUID(environment_id)
+            )
+        )
+        environment = environment_result.scalar_one()
+
+        other_environment = Environment(
+            id=uuid4(),
+            learner_id=environment.learner_id,
+            activity_id="validation-other-environment",
+        )
+        session.add(other_environment)
+        await session.flush()
+
+        other_network = EnvironmentNetwork(
+            id=uuid4(),
+            environment_id=other_environment.id,
+            name="other-environment-network",
+            subnet="172.31.0.0/24",
+            gateway="172.31.0.1",
+        )
+        session.add(other_network)
+        await session.flush()
+
+        interface_result = await session.execute(
+            select(MachineInterface.id)
+            .join(
+                EnvironmentMachine,
+                MachineInterface.machine_id == EnvironmentMachine.id,
+            )
+            .where(
+                EnvironmentMachine.environment_id == UUID(environment_id)
+            )
+            .order_by(MachineInterface.id)
+        )
+        interface_id = interface_result.scalars().first()
+        assert interface_id is not None
+
+        await session.execute(
+            update(MachineInterface)
+            .where(MachineInterface.id == interface_id)
+            .values(network_id=other_network.id)
+        )
+        await session.commit()
+
+    validation_response = await client.post(
+        f"/api/v1/sandbox/environments/{environment_id}/validate",
+        headers=headers_only(auth_headers),
+    )
+
+    assert validation_response.status_code == 200
+    body = validation_response.json()
+    assert body["valid"] is False
+    assert any(
+        "references an unknown network" in error
+        for error in body["errors"]
+    )
+
+
+
+
+@pytest.mark.asyncio
+async def test_terminate_partial_machine_failure_persists_successful_cleanup(
+    client,
+    auth_headers,
+    runtime,
+):
+    headers = headers_only(auth_headers)
+
+    create_response = await client.post(
+        "/api/v1/sandbox/environments",
+        headers=headers,
+        json={"activity_id": "api-sandbox-partial-machine-failure"},
+    )
+    assert create_response.status_code == 201, create_response.text
+
+    environment_id = create_response.json()["id"]
+
+    provision_response = await client.post(
+        f"/api/v1/sandbox/environments/{environment_id}/provision",
+        headers=headers,
+        json=provision_payload(),
+    )
+    assert provision_response.status_code == 200, provision_response.text
+
+    machine_ids = list(runtime.machines)
+    network_ids = list(runtime.networks)
+
+    assert len(machine_ids) == 2
+    assert len(network_ids) == 1
+
+    failed_machine_id = machine_ids[0]
+    successful_machine_id = machine_ids[1]
+    network_id = network_ids[0]
+
+    runtime.fail_remove_machine_ids.add(failed_machine_id)
+
+    terminate_response = await client.post(
+        f"/api/v1/sandbox/environments/{environment_id}/terminate",
+        headers=headers,
+    )
+
+    assert terminate_response.status_code == 422, terminate_response.text
+
+    assert failed_machine_id in runtime.machines
+    assert successful_machine_id not in runtime.machines
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Environment)
+            .options(
+                selectinload(Environment.networks),
+                selectinload(Environment.machines).selectinload(
+                    EnvironmentMachine.interfaces
+                ),
+            )
+            .where(
+                Environment.id == UUID(environment_id)
+            )
+        )
+        environment = result.scalar_one()
+
+        assert environment.state == EnvironmentState.FAILED
+
+        persisted_machine_ids = {
+            machine.runtime_machine_id
+            for machine in environment.machines
+        }
+
+        assert failed_machine_id in persisted_machine_ids
+        assert successful_machine_id not in persisted_machine_ids
+
+        persisted_network_ids = {
+            network.runtime_network_id
+            for network in environment.networks
+        }
+
+        assert network_id not in persisted_network_ids
+
+
+@pytest.mark.asyncio
+async def test_terminate_retry_cleans_remaining_runtime_resources(
+    client,
+    auth_headers,
+    runtime,
+):
+    headers = headers_only(auth_headers)
+
+    create_response = await client.post(
+        "/api/v1/sandbox/environments",
+        headers=headers,
+        json={"activity_id": "api-sandbox-termination-retry"},
+    )
+    assert create_response.status_code == 201, create_response.text
+
+    environment_id = create_response.json()["id"]
+
+    provision_response = await client.post(
+        f"/api/v1/sandbox/environments/{environment_id}/provision",
+        headers=headers,
+        json=provision_payload(),
+    )
+    assert provision_response.status_code == 200, provision_response.text
+
+    machine_ids = list(runtime.machines)
+    assert len(machine_ids) == 2
+
+    failed_machine_id = machine_ids[0]
+
+    runtime.fail_remove_machine_ids.add(failed_machine_id)
+
+    first_terminate = await client.post(
+        f"/api/v1/sandbox/environments/{environment_id}/terminate",
+        headers=headers,
+    )
+
+    assert first_terminate.status_code == 422, first_terminate.text
+    assert failed_machine_id in runtime.machines
+
+    runtime.fail_remove_machine_ids.clear()
+
+    second_terminate = await client.post(
+        f"/api/v1/sandbox/environments/{environment_id}/terminate",
+        headers=headers,
+    )
+
+    assert second_terminate.status_code == 200, second_terminate.text
+
+    terminated = second_terminate.json()
+
+    assert terminated["state"] == "destroyed"
+    assert runtime.machines == {}
+    assert runtime.networks == {}
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Environment)
+            .options(
+                selectinload(Environment.networks),
+                selectinload(Environment.machines).selectinload(
+                    EnvironmentMachine.interfaces
+                ),
+            )
+            .where(
+                Environment.id == UUID(environment_id)
+            )
+        )
+        environment = result.scalar_one()
+
+        assert environment.state == EnvironmentState.DESTROYED
+
+        for machine in environment.machines:
+            assert machine.runtime_machine_id is None
+
+        for network in environment.networks:
+            assert network.runtime_network_id is None
+
+
+@pytest.mark.asyncio
+async def test_terminate_network_failure_preserves_failed_network_for_retry(
+    client,
+    auth_headers,
+    runtime,
+):
+    headers = headers_only(auth_headers)
+
+    create_response = await client.post(
+        "/api/v1/sandbox/environments",
+        headers=headers,
+        json={"activity_id": "api-sandbox-network-removal-failure"},
+    )
+    assert create_response.status_code == 201, create_response.text
+
+    environment_id = create_response.json()["id"]
+
+    provision_response = await client.post(
+        f"/api/v1/sandbox/environments/{environment_id}/provision",
+        headers=headers,
+        json=provision_payload(),
+    )
+    assert provision_response.status_code == 200, provision_response.text
+
+    network_ids = list(runtime.networks)
+    assert len(network_ids) == 1
+
+    failed_network_id = network_ids[0]
+
+    runtime.fail_remove_network_ids.add(failed_network_id)
+
+    first_terminate = await client.post(
+        f"/api/v1/sandbox/environments/{environment_id}/terminate",
+        headers=headers,
+    )
+
+    assert first_terminate.status_code == 422, first_terminate.text
+    assert runtime.machines == {}
+    assert failed_network_id in runtime.networks
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Environment)
+            .options(
+                selectinload(Environment.networks),
+                selectinload(Environment.machines).selectinload(
+                    EnvironmentMachine.interfaces
+                ),
+            )
+            .where(
+                Environment.id == UUID(environment_id)
+            )
+        )
+        environment = result.scalar_one()
+
+        assert environment.state == EnvironmentState.FAILED
+        assert len(environment.networks) == 1
+        assert (
+            environment.networks[0].runtime_network_id
+            == failed_network_id
+        )
+
+        for machine in environment.machines:
+            assert machine.runtime_machine_id is None
+
+    runtime.fail_remove_network_ids.clear()
+
+    second_terminate = await client.post(
+        f"/api/v1/sandbox/environments/{environment_id}/terminate",
+        headers=headers,
+    )
+
+    assert second_terminate.status_code == 200, second_terminate.text
+
+    terminated = second_terminate.json()
+
+    assert terminated["state"] == "destroyed"
+    assert runtime.machines == {}
+    assert runtime.networks == {}
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Environment)
+            .options(
+                selectinload(Environment.networks),
+                selectinload(Environment.machines).selectinload(
+                    EnvironmentMachine.interfaces
+                ),
+            )
+            .where(
+                Environment.id == UUID(environment_id)
+            )
+        )
+        environment = result.scalar_one()
+
+        assert environment.state == EnvironmentState.DESTROYED
+        assert len(environment.networks) == 1
+        assert environment.networks[0].runtime_network_id is None
+
+        for machine in environment.machines:
+            assert machine.runtime_machine_id is None

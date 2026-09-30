@@ -11,6 +11,7 @@ from app.models.user import User
 from .api.schemas import (
     CreateEnvironmentRequest,
     EnvironmentResponse,
+    EnvironmentValidationResponse,
     ProvisionEnvironmentRequest,
 )
 from .dependencies import get_runtime_provider
@@ -185,6 +186,56 @@ async def stop_environment(
     )
 
     environment = await service.stop_environment(
+        environment_id=environment_id,
+        learner_id=current_user.id,
+    )
+
+    return EnvironmentResponse.model_validate(environment)
+
+
+@router.post(
+    "/environments/{environment_id}/validate",
+    response_model=EnvironmentValidationResponse,
+)
+async def validate_environment(
+    environment_id: UUID,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+    runtime: RuntimeProvider = Depends(get_runtime_provider),
+) -> EnvironmentValidationResponse:
+    service = EnvironmentService(
+        session=session,
+        runtime=runtime,
+    )
+
+    result = await service.validate_environment(
+        environment_id=environment_id,
+        learner_id=current_user.id,
+    )
+
+    return EnvironmentValidationResponse(
+        environment_id=environment_id,
+        valid=result.valid,
+        errors=result.errors,
+    )
+
+
+@router.post(
+    "/environments/{environment_id}/terminate",
+    response_model=EnvironmentResponse,
+)
+async def terminate_environment(
+    environment_id: UUID,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+    runtime: RuntimeProvider = Depends(get_runtime_provider),
+) -> EnvironmentResponse:
+    service = EnvironmentService(
+        session=session,
+        runtime=runtime,
+    )
+
+    environment = await service.terminate_environment(
         environment_id=environment_id,
         learner_id=current_user.id,
     )

@@ -6,6 +6,7 @@ import docker
 from docker.errors import APIError, NotFound
 
 from .provider import (
+    RuntimeCommandResult,
     RuntimeMachine,
     RuntimeNetwork,
     RuntimeNetworkAttachment,
@@ -43,7 +44,9 @@ class DockerRuntimeProvider(RuntimeProvider):
         ipam_config = None
 
         if ipam_pool is not None:
-            ipam_config = docker.types.IPAMConfig(pool_configs=[ipam_pool])
+            ipam_config = docker.types.IPAMConfig(
+                pool_configs=[ipam_pool]
+            )
 
         try:
             network = self.client.networks.create(
@@ -161,3 +164,62 @@ class DockerRuntimeProvider(RuntimeProvider):
             raise DockerRuntimeError(
                 f"Failed to inspect Docker network '{network_id}'."
             ) from exc
+
+    def execute_command(
+        self,
+        *,
+        machine_id: str,
+        command: Sequence[str],
+        timeout: int | None = None,
+    ) -> RuntimeCommandResult:
+        if not command:
+            raise DockerRuntimeError(
+                "A command is required for runtime execution."
+            )
+
+        try:
+            container = self.client.containers.get(machine_id)
+
+            if timeout is None:
+                result = container.exec_run(
+                    list(command),
+                    stdout=True,
+                    stderr=True,
+                )
+            else:
+                # Docker's exec API does not provide a portable per-command
+                # timeout through exec_run itself. The timeout is therefore
+                # handled by the caller/runtime boundary rather than passed
+                # as an unsupported Docker SDK argument.
+                result = container.exec_run(
+                    list(command),
+                    stdout=True,
+                    stderr=True,
+                )
+
+        except (APIError, NotFound) as exc:
+            raise DockerRuntimeError(
+                f"Failed to execute command on Docker machine "
+                f"'{machine_id}'."
+            ) from exc
+
+        output = result.output
+
+        if isinstance(output, tuple):
+            stdout = output[0] or b""
+            stderr = output[1] or b""
+        else:
+            stdout = output or b""
+            stderr = b""
+
+        if isinstance(stdout, bytes):
+            stdout = stdout.decode("utf-8", errors="replace")
+
+        if isinstance(stderr, bytes):
+            stderr = stderr.decode("utf-8", errors="replace")
+
+        return RuntimeCommandResult(
+            exit_code=int(result.exit_code),
+            stdout=stdout,
+            stderr=stderr,
+        )

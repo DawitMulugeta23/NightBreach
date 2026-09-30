@@ -23,6 +23,13 @@ class RuntimeNetworkAttachment:
     ipv4_address: str | None = None
 
 
+@dataclass(frozen=True)
+class RuntimeCommandResult:
+    exit_code: int
+    stdout: str
+    stderr: str
+
+
 class RuntimeProvider(ABC):
     """Logical runtime interface owned by the Sandbox domain."""
 
@@ -68,4 +75,14 @@ class RuntimeProvider(ABC):
 
     @abstractmethod
     def inspect_network(self, *, network_id: str) -> dict:
+        raise NotImplementedError
+
+    @abstractmethod
+    def execute_command(
+        self,
+        *,
+        machine_id: str,
+        command: Sequence[str],
+        timeout: int | None = None,
+    ) -> RuntimeCommandResult:
         raise NotImplementedError

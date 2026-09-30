@@ -19,7 +19,10 @@ from ..runtime.provider import (
     RuntimeNetworkAttachment,
     RuntimeProvider,
 )
-
+from ..validators.environment import (
+    EnvironmentValidationResult,
+    validate_environment,
+)
 
 from app.core.errors import (
     AuthorizationError,
@@ -171,6 +174,27 @@ class EnvironmentService:
             )
 
         return environment
+
+    async def validate_environment(
+        self,
+        *,
+        environment_id: UUID,
+        learner_id: UUID,
+    ) -> EnvironmentValidationResult:
+        if self.runtime is None:
+            raise EnvironmentProvisioningError(
+                "A runtime provider is required to validate an environment."
+            )
+
+        environment = await self.get_environment(
+            environment_id=environment_id,
+            learner_id=learner_id,
+        )
+
+        return validate_environment(
+            environment=environment,
+            runtime=self.runtime,
+        )
 
     async def transition(
         self,
@@ -409,6 +433,110 @@ class EnvironmentService:
             raise EnvironmentProvisioningError(
                 "Environment reset failed."
             ) from exc
+
+    async def terminate_environment(
+        self,
+        *,
+        environment_id: UUID,
+        learner_id: UUID,
+    ) -> Environment:
+        if self.runtime is None:
+            raise EnvironmentProvisioningError(
+                "A runtime provider is required to terminate an environment."
+            )
+
+        environment = await self.get_environment(
+            environment_id=environment_id,
+            learner_id=learner_id,
+        )
+
+        if environment.state not in {
+            EnvironmentState.REQUESTED,
+            EnvironmentState.PROVISIONING,
+            EnvironmentState.READY,
+            EnvironmentState.ACTIVE,
+            EnvironmentState.RESETTING,
+            EnvironmentState.STOPPED,
+            EnvironmentState.FAILED,
+        }:
+            raise InvalidEnvironmentTransitionError(
+                "This environment cannot be terminated from its current state."
+            )
+
+        await self.transition(
+            environment_id=environment_id,
+            learner_id=learner_id,
+            target_state=EnvironmentState.TERMINATING,
+        )
+
+        errors: list[Exception] = []
+
+        # Remove machines first so their network attachments are gone
+        # before the runtime networks are removed.
+        for machine in reversed(environment.machines):
+            runtime_machine_id = machine.runtime_machine_id
+
+            if runtime_machine_id is None:
+                continue
+
+            try:
+                try:
+                    self.runtime.stop_machine(
+                        machine_id=runtime_machine_id,
+                    )
+                except Exception:
+                    # Stopping is best-effort during termination. The
+                    # authoritative cleanup operation is machine removal.
+                    pass
+
+                self.runtime.remove_machine(
+                    machine_id=runtime_machine_id,
+                )
+            except Exception as exc:
+                errors.append(exc)
+                continue
+
+            machine.runtime_machine_id = None
+
+        # Only remove networks after machine removal has succeeded for the
+        # machines that still reference them.
+        for network in reversed(environment.networks):
+            runtime_network_id = network.runtime_network_id
+
+            if runtime_network_id is None:
+                continue
+
+            try:
+                self.runtime.remove_network(
+                    network_id=runtime_network_id,
+                )
+            except Exception as exc:
+                errors.append(exc)
+                continue
+
+            network.runtime_network_id = None
+
+        # Runtime resources cannot be restored by a database rollback. Persist
+        # the successful cleanup so the remaining runtime IDs accurately
+        # describe what a subsequent termination retry still needs to remove.
+        await self.repository.commit()
+
+        if errors:
+            await self.transition(
+                environment_id=environment_id,
+                learner_id=learner_id,
+                target_state=EnvironmentState.FAILED,
+            )
+
+            raise EnvironmentProvisioningError(
+                "Environment termination failed for one or more runtime resources."
+            ) from errors[0]
+
+        return await self.transition(
+            environment_id=environment_id,
+            learner_id=learner_id,
+            target_state=EnvironmentState.DESTROYED,
+        )
 
     async def provision_environment(
         self,

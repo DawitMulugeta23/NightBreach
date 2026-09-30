@@ -43,3 +43,9 @@ class EnvironmentResponse(BaseModel):
     activity_id: str
     state: EnvironmentState
     state_version: int
+
+
+class EnvironmentValidationResponse(BaseModel):
+    environment_id: UUID
+    valid: bool
+    errors: list[str] = Field(default_factory=list)

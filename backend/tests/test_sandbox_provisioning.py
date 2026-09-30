@@ -1,8 +1,10 @@
+from collections.abc import Sequence
 from uuid import uuid4
 
 import pytest
 
 from app.domains.sandbox.runtime.provider import (
+    RuntimeCommandResult,
     RuntimeMachine,
     RuntimeNetwork,
     RuntimeNetworkAttachment,
@@ -22,7 +24,9 @@ class FakeRuntimeProvider(RuntimeProvider):
     def __init__(self) -> None:
         self.networks: list[RuntimeNetwork] = []
         self.machines: list[RuntimeMachine] = []
-        self.attachments: list[tuple[str, tuple[RuntimeNetworkAttachment, ...]]] = []
+        self.attachments: list[
+            tuple[str, tuple[RuntimeNetworkAttachment, ...]]
+        ] = []
         self.started_machines: list[str] = []
         self.stopped_machines: list[str] = []
         self.removed_machines: list[str] = []
@@ -52,7 +56,7 @@ class FakeRuntimeProvider(RuntimeProvider):
         *,
         name: str,
         image: str,
-        network_attachments: tuple[RuntimeNetworkAttachment, ...],
+        network_attachments: Sequence[RuntimeNetworkAttachment],
     ) -> RuntimeMachine:
         if self.fail_on_create_machine:
             raise RuntimeError("machine creation failed")
@@ -62,7 +66,7 @@ class FakeRuntimeProvider(RuntimeProvider):
             name=name,
         )
         self.machines.append(machine)
-        self.attachments.append((machine.id, network_attachments))
+        self.attachments.append((machine.id, tuple(network_attachments)))
         return machine
 
     def start_machine(self, *, machine_id: str) -> None:
@@ -82,6 +86,19 @@ class FakeRuntimeProvider(RuntimeProvider):
 
     def inspect_network(self, *, network_id: str) -> dict:
         return {}
+
+    def execute_command(
+        self,
+        *,
+        machine_id: str,
+        command: Sequence[str],
+        timeout: int | None = None,
+    ) -> RuntimeCommandResult:
+        return RuntimeCommandResult(
+            exit_code=0,
+            stdout="",
+            stderr="",
+        )
 
 
 class FakeRepository:
