@@ -15,7 +15,7 @@ class Settings(BaseSettings):
         "postgresql+asyncpg://nightbreach:nightbreach@localhost:5432/nightbreach"
     )
 
-    jwt_secret_key: str = "development-only-change-me"
+    jwt_secret_key: str = "development-only-change-me-use-a-longer-key"
     jwt_algorithm: str = "HS256"
     cors_origins: str = "http://localhost:5173"
 
