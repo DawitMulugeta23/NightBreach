@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from uuid import uuid4
 
 import pytest
@@ -156,6 +157,35 @@ async def ctf_challenges():
             await session.commit()
 
 
+async def register_and_login(client, *, prefix: str) -> dict[str, str]:
+    username = f"{prefix}_{uuid4().hex[:10]}"
+    email = f"{username}@example.com"
+    password = "strong-password-123"
+
+    response = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": username,
+            "email": email,
+            "password": password,
+        },
+    )
+    assert response.status_code == 201
+
+    response = await client.post(
+        "/api/v1/auth/login",
+        json={
+            "username": username,
+            "password": password,
+        },
+    )
+    assert response.status_code == 200
+
+    return {
+        "Authorization": f"Bearer {response.json()['access_token']}",
+    }
+
+
 @pytest.mark.asyncio
 async def test_list_challenges_returns_published_only(
     client,
@@ -178,7 +208,6 @@ async def test_list_challenges_returns_published_only(
         ctf_challenges["published_id"]
     )
     assert body["items"][0]["status"] == "published"
-
     assert "validation_config" not in body["items"][0]
 
 
@@ -507,35 +536,79 @@ async def test_ctf_attempts_are_not_accessible_to_another_learner(
 
     attempt_id = start.json()["id"]
 
-    second_username = f"ctf_other_{uuid4().hex[:10]}"
-    second_email = f"{second_username}@example.com"
-    second_password = "strong-password-123"
-
-    response = await client.post(
-        "/api/v1/auth/register",
-        json={
-            "username": second_username,
-            "email": second_email,
-            "password": second_password,
-        },
+    second_headers = await register_and_login(
+        client,
+        prefix="other",
     )
-    assert response.status_code == 201
-
-    response = await client.post(
-        "/api/v1/auth/login",
-        json={
-            "username": second_username,
-            "password": second_password,
-        },
-    )
-    assert response.status_code == 200
-
-    second_headers = {
-        "Authorization": f"Bearer {response.json()['access_token']}",
-    }
 
     response = await client.get(
         f"/api/v1/ctf/attempts/{attempt_id}",
+        headers=second_headers,
+    )
+
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_another_learner_cannot_submit_attempt(
+    client,
+    auth_headers,
+    ctf_challenges,
+):
+    start = await client.post(
+        f"/api/v1/ctf/challenges/{ctf_challenges['published_id']}/attempts",
+        headers=auth_headers,
+    )
+    assert start.status_code == 201
+
+    attempt_id = start.json()["id"]
+
+    second_headers = await register_and_login(
+        client,
+        prefix="submit",
+    )
+
+    response = await client.post(
+        f"/api/v1/ctf/attempts/{attempt_id}/submit",
+        headers=second_headers,
+        json={
+            "submission_value": "NB{test-flag}",
+        },
+    )
+
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_another_learner_cannot_list_submissions(
+    client,
+    auth_headers,
+    ctf_challenges,
+):
+    start = await client.post(
+        f"/api/v1/ctf/challenges/{ctf_challenges['published_id']}/attempts",
+        headers=auth_headers,
+    )
+    assert start.status_code == 201
+
+    attempt_id = start.json()["id"]
+
+    submit = await client.post(
+        f"/api/v1/ctf/attempts/{attempt_id}/submit",
+        headers=auth_headers,
+        json={
+            "submission_value": "NB{test-flag}",
+        },
+    )
+    assert submit.status_code == 200
+
+    second_headers = await register_and_login(
+        client,
+        prefix="history",
+    )
+
+    response = await client.get(
+        f"/api/v1/ctf/attempts/{attempt_id}/submissions",
         headers=second_headers,
     )
 
@@ -569,7 +642,140 @@ async def test_environment_failed_marks_attempt_terminal(
     assert body["status"] == "environment_failed"
     assert body["completed_at"]
 
-import asyncio
+
+@pytest.mark.asyncio
+async def test_in_progress_attempt_can_be_marked_environment_failed(
+    client,
+    auth_headers,
+    ctf_challenges,
+):
+    start = await client.post(
+        f"/api/v1/ctf/challenges/{ctf_challenges['published_id']}/attempts",
+        headers=auth_headers,
+    )
+    assert start.status_code == 201
+
+    attempt_id = start.json()["id"]
+
+    started = await client.post(
+        f"/api/v1/ctf/attempts/{attempt_id}/start",
+        headers=auth_headers,
+    )
+    assert started.status_code == 200
+    assert started.json()["status"] == "in_progress"
+
+    response = await client.post(
+        f"/api/v1/ctf/attempts/{attempt_id}/environment-failed",
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "environment_failed"
+
+
+@pytest.mark.asyncio
+async def test_terminal_attempt_cannot_be_submitted(
+    client,
+    auth_headers,
+    ctf_challenges,
+):
+    start = await client.post(
+        f"/api/v1/ctf/challenges/{ctf_challenges['published_id']}/attempts",
+        headers=auth_headers,
+    )
+    assert start.status_code == 201
+
+    attempt_id = start.json()["id"]
+
+    failed = await client.post(
+        f"/api/v1/ctf/attempts/{attempt_id}/environment-failed",
+        headers=auth_headers,
+    )
+    assert failed.status_code == 200
+
+    response = await client.post(
+        f"/api/v1/ctf/attempts/{attempt_id}/submit",
+        headers=auth_headers,
+        json={
+            "submission_value": "NB{test-flag}",
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "CTF attempt is not active."
+
+
+@pytest.mark.asyncio
+async def test_terminal_attempt_cannot_be_marked_environment_failed_again(
+    client,
+    auth_headers,
+    ctf_challenges,
+):
+    start = await client.post(
+        f"/api/v1/ctf/challenges/{ctf_challenges['published_id']}/attempts",
+        headers=auth_headers,
+    )
+    assert start.status_code == 201
+
+    attempt_id = start.json()["id"]
+
+    first = await client.post(
+        f"/api/v1/ctf/attempts/{attempt_id}/environment-failed",
+        headers=auth_headers,
+    )
+    assert first.status_code == 200
+
+    second = await client.post(
+        f"/api/v1/ctf/attempts/{attempt_id}/environment-failed",
+        headers=auth_headers,
+    )
+
+    assert second.status_code == 200
+    assert second.json()["status"] == "environment_failed"
+
+
+@pytest.mark.asyncio
+async def test_invalid_validation_configuration_does_not_leak_expected_value(
+    client,
+    auth_headers,
+    ctf_challenges,
+):
+    async with AsyncSessionLocal() as session:
+        challenge = await session.get(
+            CTFChallenge,
+            ctf_challenges["published_id"],
+        )
+        assert challenge is not None
+
+        challenge.validation_config = {
+            "expected_flag": "NB{secret-that-must-not-leak}",
+            "comparison": "not-a-valid-comparison",
+        }
+
+        await session.commit()
+
+    start = await client.post(
+        f"/api/v1/ctf/challenges/{ctf_challenges['published_id']}/attempts",
+        headers=auth_headers,
+    )
+    assert start.status_code == 201
+
+    attempt_id = start.json()["id"]
+
+    response = await client.post(
+        f"/api/v1/ctf/attempts/{attempt_id}/submit",
+        headers=auth_headers,
+        json={
+            "submission_value": "anything",
+        },
+    )
+
+    assert response.status_code == 500
+
+    detail = response.json()["detail"]
+
+    assert "secret-that-must-not-leak" not in detail
+    assert "not-a-valid-comparison" not in detail
 
 
 @pytest.mark.asyncio
