@@ -143,3 +143,19 @@ from app.models.ctf_submission import CTFSubmission
 __all__.extend([
     "CTFSubmission",
 ])
+
+from app.models.progress import (
+    LearnerLearningPathProgress,
+    LearnerLessonProgress,
+    LearnerModuleProgress,
+    LearnerRoomProgress,
+    ProgressStatus,
+)
+
+__all__.extend([
+    "LearnerLearningPathProgress",
+    "LearnerLessonProgress",
+    "LearnerModuleProgress",
+    "LearnerRoomProgress",
+    "ProgressStatus",
+])
