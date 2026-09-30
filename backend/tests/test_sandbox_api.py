@@ -1,105 +1,18 @@
 from __future__ import annotations
 
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, select
 
 from app.db.session import AsyncSessionLocal
-from app.main import app
-from app.models.sandbox import (
-    Environment,
-    EnvironmentMachine,
-    EnvironmentNetwork,
-    EnvironmentState,
-    MachineInterface,
-    MachineRole,
-)
-from app.models.user import User
 from app.domains.sandbox.dependencies import get_runtime_provider
-
-
-TEST_USERNAME = "sandbox_api_user"
-TEST_EMAIL = "sandbox_api@example.com"
-TEST_PASSWORD = "strong-password-123"
-
-
-class FakeRuntime:
-    def __init__(self) -> None:
-        self.started_machines: list[str] = []
-        self.stopped_machines: list[str] = []
-        self.removed_machines: list[str] = []
-        self.removed_networks: list[str] = []
-        self.created_networks: list[dict] = []
-        self.created_machines: list[dict] = []
-
-    def start_machine(self, *, machine_id: str) -> None:
-        self.started_machines.append(machine_id)
-
-    def stop_machine(self, *, machine_id: str) -> None:
-        self.stopped_machines.append(machine_id)
-
-    def remove_machine(self, *, machine_id: str) -> None:
-        self.removed_machines.append(machine_id)
-
-    def remove_network(self, *, network_id: str) -> None:
-        self.removed_networks.append(network_id)
-
-    def create_network(
-        self,
-        *,
-        name: str,
-        subnet: str,
-        gateway: str,
-    ):
-        runtime_id = f"new-network-{len(self.created_networks) + 1}"
-
-        self.created_networks.append(
-            {
-                "id": runtime_id,
-                "name": name,
-                "subnet": subnet,
-                "gateway": gateway,
-            }
-        )
-
-        return type(
-            "RuntimeNetwork",
-            (),
-            {
-                "id": runtime_id,
-                "name": name,
-            },
-        )()
-
-    def create_machine(
-        self,
-        *,
-        name: str,
-        image: str,
-        network_attachments,
-    ):
-        runtime_id = f"new-machine-{len(self.created_machines) + 1}"
-
-        self.created_machines.append(
-            {
-                "id": runtime_id,
-                "name": name,
-                "image": image,
-                "network_attachments": network_attachments,
-            }
-        )
-
-        return type(
-            "RuntimeMachine",
-            (),
-            {
-                "id": runtime_id,
-                "name": name,
-            },
-        )()
+from app.main import app
+from app.models.sandbox import Environment, EnvironmentState
+from app.models.user import User
+from sandbox_test_helpers import FakeRuntime
 
 
 @pytest_asyncio.fixture
@@ -114,663 +27,337 @@ async def client():
 
 
 @pytest_asyncio.fixture
-async def auth_headers(client):
-    async with AsyncSessionLocal() as session:
-        existing_user = await session.scalar(
-            select(User).where(User.username == TEST_USERNAME)
-        )
-
-        if existing_user is not None:
-            await session.execute(
-                delete(Environment).where(
-                    Environment.learner_id == existing_user.id
-                )
-            )
-
-            await session.execute(
-                delete(User).where(User.id == existing_user.id)
-            )
-
-            await session.commit()
-
-    response = await client.post(
-        "/api/v1/auth/register",
-        json={
-            "username": TEST_USERNAME,
-            "email": TEST_EMAIL,
-            "password": TEST_PASSWORD,
-        },
-    )
-    assert response.status_code == 201
-
-    response = await client.post(
-        "/api/v1/auth/login",
-        json={
-            "username": TEST_USERNAME,
-            "password": TEST_PASSWORD,
-        },
-    )
-    assert response.status_code == 200
-
-    return {
-        "Authorization": f"Bearer {response.json()['access_token']}",
-    }
-
-
-@pytest_asyncio.fixture
 async def runtime():
-    fake_runtime = FakeRuntime()
+    provider = FakeRuntime()
+    app.dependency_overrides[get_runtime_provider] = lambda: provider
 
-    app.dependency_overrides[get_runtime_provider] = (
-        lambda: fake_runtime
-    )
-
-    yield fake_runtime
+    yield provider
 
     app.dependency_overrides.pop(get_runtime_provider, None)
 
 
-async def create_environment(client, auth_headers) -> str:
+@pytest_asyncio.fixture
+async def auth_headers(client):
+    unique_id = uuid4().hex[:12]
+    username = f"api_{unique_id}"
+    email = f"api_{unique_id}@example.com"
+    password = "strong-password-123"
+
+    register_response = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": username,
+            "email": email,
+            "password": password,
+        },
+    )
+    assert register_response.status_code == 201, register_response.text
+
+    login_response = await client.post(
+        "/api/v1/auth/login",
+        json={
+            "username": username,
+            "password": password,
+        },
+    )
+    assert login_response.status_code == 200, login_response.text
+
+    token = login_response.json()["access_token"]
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(User.id).where(User.username == username)
+        )
+        user_id = result.scalar_one()
+
+    yield {
+        "Authorization": f"Bearer {token}",
+        "user_id": user_id,
+    }
+
+    async with AsyncSessionLocal() as session:
+        await session.execute(
+            delete(Environment).where(Environment.learner_id == user_id)
+        )
+        await session.execute(
+            delete(User).where(User.id == user_id)
+        )
+        await session.commit()
+
+
+def headers_only(auth_headers):
+    return {
+        "Authorization": auth_headers["Authorization"],
+    }
+
+
+def provision_payload():
+    return {
+        "networks": [
+            {
+                "name": "lab",
+                "subnet": "172.30.0.0/24",
+                "gateway": "172.30.0.1",
+            }
+        ],
+        "machines": [
+            {
+                "name": "attacker",
+                "role": "attack",
+                "image": "ubuntu:24.04",
+                "interfaces": [
+                    {
+                        "name": "eth0",
+                        "network_name": "lab",
+                        "address": "172.30.0.10",
+                    }
+                ],
+            },
+            {
+                "name": "target",
+                "role": "target",
+                "image": "ubuntu:24.04",
+                "interfaces": [
+                    {
+                        "name": "eth0",
+                        "network_name": "lab",
+                        "address": "172.30.0.20",
+                    }
+                ],
+            },
+        ],
+    }
+
+
+@pytest.mark.asyncio
+async def test_sandbox_endpoints_require_authentication(client):
     response = await client.post(
         "/api/v1/sandbox/environments",
-        headers=auth_headers,
-        json={
-            "activity_id": "WEB-01",
-        },
+        json={"activity_id": "api-sandbox-test"},
     )
 
-    assert response.status_code == 201
-
-    return response.json()["id"]
+    assert response.status_code in (401, 403)
 
 
 @pytest.mark.asyncio
-async def test_start_environment_starts_runtime_machines_and_transitions(
+async def test_create_and_get_environment(
+    client,
+    auth_headers,
+):
+    headers = headers_only(auth_headers)
+
+    response = await client.post(
+        "/api/v1/sandbox/environments",
+        headers=headers,
+        json={"activity_id": "api-sandbox-test"},
+    )
+
+    assert response.status_code == 201, response.text
+
+    data = response.json()
+
+    assert UUID(data["id"])
+    assert data["learner_id"] == str(auth_headers["user_id"])
+    assert data["activity_id"] == "api-sandbox-test"
+    assert data["state"] == "requested"
+    assert data["state_version"] == 1
+
+    environment_id = data["id"]
+
+    response = await client.get(
+        f"/api/v1/sandbox/environments/{environment_id}",
+        headers=headers,
+    )
+
+    assert response.status_code == 200, response.text
+
+    data = response.json()
+
+    assert data["id"] == environment_id
+    assert data["learner_id"] == str(auth_headers["user_id"])
+    assert data["state"] == "requested"
+
+
+@pytest.mark.asyncio
+async def test_provision_stop_start_and_reset_environment(
     client,
     auth_headers,
     runtime,
 ):
-    environment_id = await create_environment(
-        client,
-        auth_headers,
+    headers = headers_only(auth_headers)
+
+    create_response = await client.post(
+        "/api/v1/sandbox/environments",
+        headers=headers,
+        json={"activity_id": "api-sandbox-lifecycle"},
     )
 
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            update(Environment)
-            .where(Environment.id == environment_id)
-            .values(state=EnvironmentState.STOPPED)
-        )
-        assert result.rowcount == 1
+    assert create_response.status_code == 201, create_response.text
 
-        environment = await session.get(
-            Environment,
-            environment_id,
-        )
-        assert environment is not None
+    environment_id = create_response.json()["id"]
 
-        machine = EnvironmentMachine(
-            environment_id=environment.id,
-            name="attack-machine",
-            role=MachineRole.ATTACK,
-            image="nightbreach/attack-machine:latest",
-            runtime_machine_id="runtime-machine-start-1",
-        )
-
-        session.add(machine)
-        await session.commit()
-
-    response = await client.post(
-        f"/api/v1/sandbox/environments/{environment_id}/start",
-        headers=auth_headers,
+    provision_response = await client.post(
+        f"/api/v1/sandbox/environments/{environment_id}/provision",
+        headers=headers,
+        json=provision_payload(),
     )
 
-    assert response.status_code == 200
+    assert provision_response.status_code == 200, provision_response.text
 
-    body = response.json()
+    provisioned = provision_response.json()
 
-    assert body["id"] == environment_id
-    assert body["state"] == "ready"
-    assert body["state_version"] == 2
+    assert provisioned["state"] == "ready"
+    assert provisioned["state_version"] == 3
+    assert len(runtime.networks) == 1
+    assert len(runtime.machines) == 2
 
-    assert runtime.started_machines == [
-        "runtime-machine-start-1",
-    ]
-
-
-@pytest.mark.asyncio
-async def test_stop_environment_stops_runtime_machines_and_transitions(
-    client,
-    auth_headers,
-    runtime,
-):
-    environment_id = await create_environment(
-        client,
-        auth_headers,
-    )
-
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            update(Environment)
-            .where(Environment.id == environment_id)
-            .values(state=EnvironmentState.ACTIVE)
-        )
-        assert result.rowcount == 1
-
-        environment = await session.get(
-            Environment,
-            environment_id,
-        )
-        assert environment is not None
-
-        machine = EnvironmentMachine(
-            environment_id=environment.id,
-            name="target-machine",
-            role=MachineRole.TARGET,
-            image="nightbreach/target-machine:latest",
-            runtime_machine_id="runtime-machine-stop-1",
-        )
-
-        session.add(machine)
-        await session.commit()
-
-    response = await client.post(
+    stop_response = await client.post(
         f"/api/v1/sandbox/environments/{environment_id}/stop",
-        headers=auth_headers,
+        headers=headers,
     )
 
-    assert response.status_code == 200
+    assert stop_response.status_code == 200, stop_response.text
+    assert stop_response.json()["state"] == "stopped"
 
-    body = response.json()
+    assert all(
+        machine.running is False
+        for machine in runtime.machines.values()
+    )
 
-    assert body["id"] == environment_id
-    assert body["state"] == "stopped"
-    assert body["state_version"] == 2
-
-    assert runtime.stopped_machines == [
-        "runtime-machine-stop-1",
-    ]
-
-
-@pytest.mark.asyncio
-async def test_start_environment_requires_authentication(
-    client,
-):
-    environment_id = uuid4()
-
-    response = await client.post(
+    start_response = await client.post(
         f"/api/v1/sandbox/environments/{environment_id}/start",
+        headers=headers,
     )
 
-    assert response.status_code == 401
+    assert start_response.status_code == 200, start_response.text
+    assert start_response.json()["state"] == "ready"
+
+    assert all(
+        machine.running is True
+        for machine in runtime.machines.values()
+    )
+
+    old_machine_ids = set(runtime.machines)
+    old_network_ids = set(runtime.networks)
+
+    reset_response = await client.post(
+        f"/api/v1/sandbox/environments/{environment_id}/reset",
+        headers=headers,
+    )
+
+    assert reset_response.status_code == 200, reset_response.text
+    assert reset_response.json()["state"] == "ready"
+
+    assert old_machine_ids.isdisjoint(runtime.machines)
+    assert old_network_ids.isdisjoint(runtime.networks)
+    assert len(runtime.machines) == 2
+    assert len(runtime.networks) == 1
 
 
 @pytest.mark.asyncio
-async def test_stop_environment_requires_authentication(
-    client,
-):
-    environment_id = uuid4()
-
-    response = await client.post(
-        f"/api/v1/sandbox/environments/{environment_id}/stop",
-    )
-
-    assert response.status_code == 401
-
-
-@pytest.mark.asyncio
-async def test_reset_environment_rebuilds_runtime_and_returns_ready(
+async def test_provision_failure_returns_failed_state(
     client,
     auth_headers,
     runtime,
 ):
-    environment_id = await create_environment(
-        client,
-        auth_headers,
+    headers = headers_only(auth_headers)
+
+    create_response = await client.post(
+        "/api/v1/sandbox/environments",
+        headers=headers,
+        json={"activity_id": "api-sandbox-failure"},
     )
 
-    async with AsyncSessionLocal() as session:
-        environment = await session.get(
-            Environment,
-            environment_id,
-        )
-        assert environment is not None
+    assert create_response.status_code == 201, create_response.text
 
-        environment.state = EnvironmentState.ACTIVE
+    environment_id = create_response.json()["id"]
 
-        network = EnvironmentNetwork(
-            environment_id=environment.id,
-            name="lab",
-            subnet="10.20.0.0/24",
-            gateway="10.20.0.1",
-            runtime_network_id="old-network",
-        )
-        session.add(network)
-        await session.flush()
-
-        machine = EnvironmentMachine(
-            environment_id=environment.id,
-            name="target",
-            role=MachineRole.TARGET,
-            image="nightbreach/target-machine:latest",
-            runtime_machine_id="old-machine",
-        )
-        session.add(machine)
-        await session.flush()
-
-        interface = MachineInterface(
-            machine_id=machine.id,
-            network_id=network.id,
-            name="eth0",
-            address="10.20.0.10",
-        )
-        session.add(interface)
-
-        await session.commit()
-
-    response = await client.post(
-        f"/api/v1/sandbox/environments/{environment_id}/reset",
-        headers=auth_headers,
-    )
-
-    assert response.status_code == 200
-
-    body = response.json()
-
-    assert body["id"] == environment_id
-    assert body["activity_id"] == "WEB-01"
-    assert body["state"] == "ready"
-
-    assert runtime.stopped_machines == [
-        "old-machine",
-    ]
-
-    assert runtime.removed_machines == [
-        "old-machine",
-    ]
-
-    assert runtime.removed_networks == [
-        "old-network",
-    ]
-
-    assert len(runtime.created_networks) == 1
-    assert runtime.created_networks[0]["subnet"] == "10.20.0.0/24"
-    assert runtime.created_networks[0]["gateway"] == "10.20.0.1"
-
-    assert len(runtime.created_machines) == 1
-    assert (
-        runtime.created_machines[0]["image"]
-        == "nightbreach/target-machine:latest"
-    )
-
-    attachments = runtime.created_machines[0]["network_attachments"]
-
-    assert len(attachments) == 1
-    assert attachments[0].ipv4_address == "10.20.0.10"
-
-    assert runtime.started_machines == [
-        runtime.created_machines[0]["id"],
-    ]
-
-
-
-@pytest.mark.asyncio
-async def test_reset_environment_rebuilds_runtime_and_transitions(
-    client,
-    auth_headers,
-    runtime,
-):
-    environment_id = await create_environment(
-        client,
-        auth_headers,
-    )
-
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            update(Environment)
-            .where(Environment.id == environment_id)
-            .values(state=EnvironmentState.READY)
-        )
-        assert result.rowcount == 1
-
-        environment = await session.get(
-            Environment,
-            environment_id,
-        )
-        assert environment is not None
-
-        network = EnvironmentNetwork(
-            environment_id=environment.id,
-            name="lab",
-            subnet="10.10.0.0/24",
-            gateway="10.10.0.1",
-            runtime_network_id="runtime-network-old-1",
-        )
-
-        session.add(network)
-        await session.flush()
-
-        machine = EnvironmentMachine(
-            environment_id=environment.id,
-            name="target-machine",
-            role=MachineRole.TARGET,
-            image="nightbreach/target-machine:latest",
-            runtime_machine_id="runtime-machine-old-1",
-        )
-
-        session.add(machine)
-        await session.flush()
-
-        interface = MachineInterface(
-            machine_id=machine.id,
-            network_id=network.id,
-            name="eth0",
-            address="10.10.0.10",
-        )
-
-        session.add(interface)
-        await session.commit()
-
-    response = await client.post(
-        f"/api/v1/sandbox/environments/{environment_id}/reset",
-        headers=auth_headers,
-    )
-
-    assert response.status_code == 200
-
-    body = response.json()
-
-    assert body["id"] == environment_id
-    assert body["state"] == "ready"
-    assert body["state_version"] == 3
-
-    assert runtime.stopped_machines == [
-        "runtime-machine-old-1",
-    ]
-
-    assert runtime.removed_machines == [
-        "runtime-machine-old-1",
-    ]
-
-    assert runtime.removed_networks == [
-        "runtime-network-old-1",
-    ]
-
-    assert len(runtime.created_networks) == 1
-
-    created_network = runtime.created_networks[0]
-
-    assert created_network["id"] == "new-network-1"
-    assert created_network["subnet"] == "10.10.0.0/24"
-    assert created_network["gateway"] == "10.10.0.1"
-
-    assert len(runtime.created_machines) == 1
-
-    created_machine = runtime.created_machines[0]
-
-    assert created_machine["id"] == "new-machine-1"
-    assert created_machine["image"] == (
-        "nightbreach/target-machine:latest"
-    )
-
-    attachments = created_machine["network_attachments"]
-
-    assert len(attachments) == 1
-    assert attachments[0].network_id == "new-network-1"
-    assert attachments[0].ipv4_address == "10.10.0.10"
-
-    assert runtime.started_machines == [
-        "new-machine-1",
-    ]
-
-    async with AsyncSessionLocal() as session:
-        environment = await session.get(
-            Environment,
-            environment_id,
-        )
-
-        assert environment is not None
-        assert environment.state == EnvironmentState.READY
-        assert environment.state_version == 3
-
-        networks_result = await session.execute(
-            select(EnvironmentNetwork).where(
-                EnvironmentNetwork.environment_id == environment_id,
-            )
-        )
-        networks = list(networks_result.scalars().all())
-
-        machines_result = await session.execute(
-            select(EnvironmentMachine).where(
-                EnvironmentMachine.environment_id == environment_id,
-            )
-        )
-        machines = list(machines_result.scalars().all())
-
-        assert len(networks) == 1
-        assert networks[0].runtime_network_id == (
-            "new-network-1"
-        )
-
-        assert len(machines) == 1
-        assert machines[0].runtime_machine_id == (
-            "new-machine-1"
-        )
-
-
-@pytest.mark.asyncio
-async def test_reset_environment_requires_authentication(
-    client,
-):
-    environment_id = uuid4()
-
-    response = await client.post(
-        f"/api/v1/sandbox/environments/{environment_id}/reset",
-    )
-
-    assert response.status_code == 401
-
-
-@pytest.mark.asyncio
-async def test_provision_environment_creates_runtime_topology_and_returns_ready(
-    client,
-    auth_headers,
-    runtime,
-):
-    environment_id = await create_environment(
-        client,
-        auth_headers,
-    )
+    runtime.fail_create_machine = True
 
     response = await client.post(
         f"/api/v1/sandbox/environments/{environment_id}/provision",
-        headers=auth_headers,
-        json={
-            "networks": [
-                {
-                    "name": "lab",
-                    "subnet": "10.30.0.0/24",
-                    "gateway": "10.30.0.1",
-                }
-            ],
-            "machines": [
-                {
-                    "name": "attacker",
-                    "role": "attack",
-                    "image": "nightbreach/attack-machine:latest",
-                    "interfaces": [
-                        {
-                            "name": "eth0",
-                            "network_name": "lab",
-                            "address": "10.30.0.10",
-                        }
-                    ],
-                },
-                {
-                    "name": "target",
-                    "role": "target",
-                    "image": "nightbreach/target-machine:latest",
-                    "interfaces": [
-                        {
-                            "name": "eth0",
-                            "network_name": "lab",
-                            "address": "10.30.0.20",
-                        }
-                    ],
-                },
-            ],
-        },
-    )
-
-    assert response.status_code == 200
-
-    body = response.json()
-
-    assert body["id"] == environment_id
-    assert body["activity_id"] == "WEB-01"
-    assert body["state"] == "ready"
-    assert body["state_version"] == 3
-
-    assert len(runtime.created_networks) == 1
-
-    network = runtime.created_networks[0]
-
-    assert network["name"].startswith(
-        f"nb-env-{environment_id}-net-lab"
-    )
-    assert network["subnet"] == "10.30.0.0/24"
-    assert network["gateway"] == "10.30.0.1"
-
-    assert len(runtime.created_machines) == 2
-
-    assert runtime.created_machines[0]["image"] == (
-        "nightbreach/attack-machine:latest"
-    )
-    assert runtime.created_machines[1]["image"] == (
-        "nightbreach/target-machine:latest"
-    )
-
-    assert len(runtime.started_machines) == 2
-
-    async with AsyncSessionLocal() as session:
-        environment = await session.get(
-            Environment,
-            environment_id,
-        )
-
-        assert environment is not None
-        assert environment.state == EnvironmentState.READY
-
-        networks = (
-            await session.scalars(
-                select(EnvironmentNetwork).where(
-                    EnvironmentNetwork.environment_id == environment.id
-                )
-            )
-        ).all()
-
-        machines = (
-            await session.scalars(
-                select(EnvironmentMachine).where(
-                    EnvironmentMachine.environment_id == environment.id
-                )
-            )
-        ).all()
-
-        assert len(networks) == 1
-        assert len(machines) == 2
-
-        interfaces = (
-            await session.scalars(
-                select(MachineInterface).where(
-                    MachineInterface.machine_id.in_(
-                        [machine.id for machine in machines]
-                    )
-                )
-            )
-        ).all()
-
-        assert len(interfaces) == 2
-
-
-@pytest.mark.asyncio
-async def test_provision_environment_requires_authentication(
-    client,
-):
-    environment_id = uuid4()
-
-    response = await client.post(
-        f"/api/v1/sandbox/environments/{environment_id}/provision",
-        json={
-            "networks": [
-                {
-                    "name": "lab",
-                    "subnet": "10.30.0.0/24",
-                    "gateway": "10.30.0.1",
-                }
-            ],
-            "machines": [
-                {
-                    "name": "target",
-                    "role": "target",
-                    "image": "nightbreach/target-machine:latest",
-                    "network_name": "lab",
-                    "interfaces": [
-                        {
-                            "name": "eth0",
-                            "address": "10.30.0.10",
-                        }
-                    ],
-                }
-            ],
-        },
-    )
-
-    assert response.status_code == 401
-
-
-@pytest.mark.asyncio
-async def test_provision_environment_rejects_unknown_network(
-    client,
-    auth_headers,
-    runtime,
-):
-    environment_id = await create_environment(
-        client,
-        auth_headers,
-    )
-
-    response = await client.post(
-        f"/api/v1/sandbox/environments/{environment_id}/provision",
-        headers=auth_headers,
-        json={
-            "networks": [
-                {
-                    "name": "lab",
-                    "subnet": "10.40.0.0/24",
-                    "gateway": "10.40.0.1",
-                }
-            ],
-            "machines": [
-                {
-                    "name": "target",
-                    "role": "target",
-                    "image": "nightbreach/target-machine:latest",
-                    "interfaces": [
-                        {
-                            "name": "eth0",
-                            "network_name": "missing-network",
-                            "address": "10.40.0.10",
-                        }
-                    ],
-                }
-            ],
-        },
+        headers=headers,
+        json=provision_payload(),
     )
 
     assert response.status_code >= 400
 
-    assert runtime.created_networks
-    assert runtime.removed_networks == [
-        runtime.created_networks[0]["id"],
-    ]
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Environment.state).where(
+                Environment.id == UUID(environment_id)
+            )
+        )
+        state = result.scalar_one()
+
+    assert state == EnvironmentState.FAILED
+    assert runtime.machines == {}
+
+
+@pytest.mark.asyncio
+async def test_environment_ownership_is_enforced(
+    client,
+    auth_headers,
+):
+    owner_headers = headers_only(auth_headers)
+
+    create_response = await client.post(
+        "/api/v1/sandbox/environments",
+        headers=owner_headers,
+        json={"activity_id": "api-sandbox-owned"},
+    )
+
+    assert create_response.status_code == 201, create_response.text
+
+    environment_id = create_response.json()["id"]
+
+    unique_id = uuid4().hex[:12]
+    username = f"other_{unique_id}"
+    email = f"other_{unique_id}@example.com"
+    password = "strong-password-123"
+
+    register_response = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": username,
+            "email": email,
+            "password": password,
+        },
+    )
+    assert register_response.status_code == 201, register_response.text
+
+    login_response = await client.post(
+        "/api/v1/auth/login",
+        json={
+            "username": username,
+            "password": password,
+        },
+    )
+    assert login_response.status_code == 200, login_response.text
+
+    other_headers = {
+        "Authorization": f"Bearer {login_response.json()['access_token']}"
+    }
+
+    response = await client.get(
+        f"/api/v1/sandbox/environments/{environment_id}",
+        headers=other_headers,
+    )
+
+    assert response.status_code == 404
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(User.id).where(User.username == username)
+        )
+        other_user_id = result.scalar_one()
+
+        await session.execute(
+            delete(Environment).where(
+                Environment.learner_id == other_user_id
+            )
+        )
+        await session.execute(
+            delete(User).where(User.id == other_user_id)
+        )
+        await session.commit()

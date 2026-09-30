@@ -4,12 +4,15 @@ from app.models.ctf_attempt import CTFAttemptStatus
 ALLOWED_ATTEMPT_TRANSITIONS = {
     CTFAttemptStatus.CREATED: {
         CTFAttemptStatus.STARTED,
+        CTFAttemptStatus.ENVIRONMENT_FAILED,
     },
     CTFAttemptStatus.STARTED: {
         CTFAttemptStatus.IN_PROGRESS,
+        CTFAttemptStatus.ENVIRONMENT_FAILED,
     },
     CTFAttemptStatus.IN_PROGRESS: {
         CTFAttemptStatus.SUBMITTED,
+        CTFAttemptStatus.ENVIRONMENT_FAILED,
     },
     CTFAttemptStatus.SUBMITTED: {
         CTFAttemptStatus.EVALUATING,

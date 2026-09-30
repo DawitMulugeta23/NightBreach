@@ -23,9 +23,9 @@ from app.domains.ctf.schemas import (
 )
 from app.domains.ctf.service import (
     CTFAttemptNotActiveError,
-    CTFEnvironmentFailureTransitionError,
     CTFService,
 )
+from app.domains.ctf.state_machine import InvalidCTFAttemptTransition
 from app.models.user import User
 
 
@@ -184,7 +184,7 @@ async def mark_in_progress(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
         ) from exc
-    except Exception as exc:
+    except InvalidCTFAttemptTransition as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="CTF attempt cannot be started from its current state.",
@@ -352,10 +352,10 @@ async def mark_environment_failed(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
         ) from exc
-    except CTFEnvironmentFailureTransitionError as exc:
+    except InvalidCTFAttemptTransition as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=str(exc),
+            detail="CTF environment cannot be failed from the current attempt state.",
         ) from exc
 
     await session.commit()

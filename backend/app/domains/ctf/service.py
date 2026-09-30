@@ -4,24 +4,14 @@ from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 from app.core.errors import NotFoundError
-from app.domains.ctf.evaluator import (
-    CTFEvaluationConfigurationError,
-    evaluate_submission,
-)
+from app.domains.ctf.evaluator import evaluate_submission
 from app.domains.ctf.repository import CTFRepository
-from app.domains.ctf.state_machine import (
-    InvalidCTFAttemptTransition,
-    validate_attempt_transition,
-)
+from app.domains.ctf.state_machine import validate_attempt_transition
 from app.models.ctf_attempt import CTFAttempt, CTFAttemptStatus
 from app.models.ctf_submission import CTFSubmission
 
 
 class CTFAttemptNotActiveError(Exception):
-    pass
-
-
-class CTFEnvironmentFailureTransitionError(Exception):
     pass
 
 
@@ -255,14 +245,10 @@ class CTFService:
         if attempt.status == CTFAttemptStatus.ENVIRONMENT_FAILED:
             return attempt
 
-        if attempt.status not in {
-            CTFAttemptStatus.CREATED,
-            CTFAttemptStatus.STARTED,
-            CTFAttemptStatus.IN_PROGRESS,
-        }:
-            raise CTFEnvironmentFailureTransitionError(
-                "CTF environment cannot be failed from the current attempt state."
-            )
+        validate_attempt_transition(
+            attempt.status,
+            CTFAttemptStatus.ENVIRONMENT_FAILED,
+        )
 
         attempt.status = CTFAttemptStatus.ENVIRONMENT_FAILED
         attempt.completed_at = datetime.now(timezone.utc)
