@@ -133,6 +133,66 @@ async def test_complete_lesson_rejects_incomplete_requirements(
 
 
 @pytest.mark.asyncio
+async def test_complete_room_rejects_incomplete_lessons(
+    client,
+    learning_catalog,
+    auth_headers,
+):
+    room_id = learning_catalog["published_room_id"]
+
+    response = await client.post(
+        f"/api/v1/progress/rooms/{room_id}/complete",
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 422
+
+    data = response.json()
+    assert data["error"]["code"] == "VALIDATION_ERROR"
+    assert "message" in data["error"]
+
+
+@pytest.mark.asyncio
+async def test_complete_module_rejects_incomplete_rooms(
+    client,
+    learning_catalog,
+    auth_headers,
+):
+    module_id = learning_catalog["published_module_id"]
+
+    response = await client.post(
+        f"/api/v1/progress/modules/{module_id}/complete",
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 422
+
+    data = response.json()
+    assert data["error"]["code"] == "VALIDATION_ERROR"
+    assert "message" in data["error"]
+
+
+@pytest.mark.asyncio
+async def test_complete_learning_path_rejects_incomplete_modules(
+    client,
+    learning_catalog,
+    auth_headers,
+):
+    learning_path_id = learning_catalog["first_path_id"]
+
+    response = await client.post(
+        f"/api/v1/progress/learning-paths/{learning_path_id}/complete",
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 422
+
+    data = response.json()
+    assert data["error"]["code"] == "VALIDATION_ERROR"
+    assert "message" in data["error"]
+
+
+@pytest.mark.asyncio
 async def test_completed_rooms_and_modules_are_empty_initially(
     client,
     learning_catalog,
