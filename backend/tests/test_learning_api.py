@@ -482,28 +482,13 @@ async def test_module_under_draft_path_is_not_exposed(
     auth_headers,
     clean_learning_test_user,
 ):
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            delete(Module).where(
-                Module.slug == "test-module-under-draft-path"
-            )
-        )
-        await session.commit()
+    response = await client.get(
+        f"/api/v1/modules/{learning_catalog['draft_module_id']}",
+        headers=auth_headers,
+    )
 
-    # The fixture intentionally creates this hierarchy to verify parent
-    # publication, but the ID is not retained above. Re-create the check
-    # through the draft path's published module relationship.
-    async with AsyncSessionLocal() as session:
-        from sqlalchemy import select
-
-        result = await session.execute(
-            select(Module).where(
-                Module.slug == "test-module-under-draft-path"
-            )
-        )
-        module = result.scalar_one_or_none()
-
-    assert module is None
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "RESOURCE_NOT_FOUND"
 
 
 @pytest.mark.asyncio
