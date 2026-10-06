@@ -17,7 +17,12 @@ class Settings(BaseSettings):
 
     jwt_secret_key: str = "development-only-change-me-use-a-longer-key"
     jwt_algorithm: str = "HS256"
-    cors_origins: str = "http://localhost:5173"
+    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+
+    # Lab cleanup (see app/domains/sandbox/workers/sweeper.py)
+    lab_sweep_enabled: bool = True
+    lab_sweep_interval_seconds: int = 60
+    lab_stuck_minutes: int = 15
 
     model_config = SettingsConfigDict(
         env_file=".env",
