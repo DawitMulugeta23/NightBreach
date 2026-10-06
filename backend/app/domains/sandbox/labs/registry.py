@@ -114,8 +114,28 @@ LINUX_FILE_PERMISSIONS = LabDefinition(
     ),
 )
 
+LINUX_PRACTICE = LabDefinition(
+    slug="linux-practice",
+    name="Linux Practice Machine",
+    description="A private Linux terminal for trying the commands from the lessons.",
+    version="1.0",
+    machines=(
+        LabMachine(
+            name="attacker",
+            title="Practice Machine",
+            role=MachineRole.ATTACK,
+            image="nightbreach/attacker:1.0",
+            host_octet=10,
+            limits=_ATTACKER_LIMITS,
+        ),
+    ),
+    objectives=(),
+    ttl_minutes=60,
+)
+
 LABS: dict[str, LabDefinition] = {
     LINUX_FILE_PERMISSIONS.slug: LINUX_FILE_PERMISSIONS,
+    LINUX_PRACTICE.slug: LINUX_PRACTICE,
 }
 
 

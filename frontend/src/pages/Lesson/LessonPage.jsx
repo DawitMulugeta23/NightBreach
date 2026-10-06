@@ -144,9 +144,11 @@ function LessonPage() {
   const blocks = Array.isArray(lesson.content_blocks)
     ? lesson.content_blocks
     : []
-  const lessonPractices = Array.isArray(lesson.lesson_practices)
-    ? lesson.lesson_practices
-    : []
+  const lessonPractices = (
+    Array.isArray(lesson.lesson_practices) ? lesson.lesson_practices : []
+  )
+    .slice()
+    .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
 
   const roomLessons = (Array.isArray(room?.lessons) ? room.lessons : [])
     .slice()

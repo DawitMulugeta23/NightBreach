@@ -63,7 +63,9 @@ OK = RuntimeCommandResult(exit_code=0, stdout="", stderr="")
 @pytest.mark.parametrize("lab", list(LABS.values()))
 def test_registry_labs_are_well_formed(lab):
     roles = {machine.role for machine in lab.machines}
-    assert MachineRole.ATTACK in roles and MachineRole.TARGET in roles
+    assert MachineRole.ATTACK in roles
+    if len(lab.machines) > 1:
+        assert MachineRole.TARGET in roles
 
     for machine in lab.machines:
         assert ":" in machine.image and not machine.image.endswith(":latest")
@@ -167,3 +169,9 @@ def test_lab_response_hides_target_address_and_secrets():
     assert "10.200.1.0/24" in dumped        # lab subnet is shown
     assert environment.lab_secret not in dumped
     assert "NB{" not in dumped
+
+
+def test_practice_machine_is_a_single_machine_without_objectives():
+    lab = get_lab("linux-practice")
+    assert [machine.role for machine in lab.machines] == [MachineRole.ATTACK]
+    assert lab.objectives == ()

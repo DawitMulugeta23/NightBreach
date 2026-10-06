@@ -11,8 +11,8 @@ CONTENT = {
         h("The Terminal"),
         t("The terminal provides a text interface through which you interact with the operating "
           "system. Instead of clicking graphical controls, you type commands and receive text output."),
-        code("student@attacker:~$", [
-            ("student", "Your user name."),
+        code("learner@attacker:~$", [
+            ("learner", "Your user name."),
             ("@", "Separates the user name from the machine name."),
             ("attacker", "The name of the machine you are working on."),
             (":~", "Your current directory. ~ is a shortcut for your home directory."),
@@ -53,7 +53,7 @@ CONTENT = {
             ("-L (optional)", "Show the path as you typed it, including symbolic links. This is the default."),
             ("-P (optional)", "Show the real physical path with symbolic links resolved."),
         ]),
-        out("/home/student"),
+        out("/home/learner"),
         h("Listing a Directory"),
         code("ls", [
             ("ls", "Lists the names of the files and directories in the current directory."),
@@ -131,17 +131,18 @@ CONTENT = {
 
     "absolute-and-relative-paths": [
         h("Absolute Paths"),
-        t("An absolute path starts from the filesystem root. For example, /home/student/notes.txt "
+        t("An absolute path starts from the filesystem root. For example, /home/learner/notes.txt "
           "identifies a specific location from the root of the filesystem."),
-        code("cat /home/student/notes.txt", [
+        code("cat /home/learner/notes.txt", [
             ("cat", "Prints the contents of a file."),
-            ("/home/student/notes.txt", "An absolute path. It starts with /, so it means the "
+            ("/home/learner/notes.txt", "An absolute path. It starts with /, so it means the "
                                         "same file no matter which directory you are in."),
             ("/", "The root directory."),
             ("home", "A directory inside /."),
-            ("student", "A directory inside home, here the home directory of the user student."),
+            ("learner", "A directory inside home, here the home directory of the user learner."),
             ("notes.txt", "The file inside it."),
         ]),
+        t("To follow along in the practice machine, first create the file in your home directory: run cd ~ and then touch notes.txt."),
         h("Relative Paths"),
         t("A relative path is interpreted from the current working directory."),
         code("cat notes.txt", [
@@ -158,7 +159,7 @@ CONTENT = {
             (". (single dot)", "The current directory, for example ./script.sh runs a script in it."),
             ("~", "Your home directory. cd ~ and cd with no argument both take you there."),
         ]),
-        t("If you start in /home/student/linux-lab, pwd now prints /home/student."),
+        t("If you start in /home/learner/linux-lab, pwd now prints /home/learner."),
         callout("tip", "Remember",
                 "Absolute paths begin from /. Relative paths begin from your current working directory."),
     ],
@@ -213,7 +214,7 @@ CONTENT = {
             ("touch evidence.txt", "Create an empty file inside lab."),
             ("ls", "Verify: the new file should now be listed."),
         ]),
-        out("/home/student\nevidence.txt"),
+        out("/home/learner\nevidence.txt"),
         t("The first ls printed nothing because the directory was empty, and the last ls shows "
           "evidence.txt, which proves the file was created inside lab. If your directory already "
           "contained files, the first ls lists them."),
@@ -227,11 +228,11 @@ CONTENT = {
             ("-a", "All entries, including . (this directory) and .. (its parent)."),
             ("-la", "Short options can be combined: -la is the same as -l -a."),
         ]),
-        out("/home/student/lab\n"
+        out("/home/learner/lab\n"
             "total 8\n"
-            "drwxr-xr-x 2 student student 4096 Oct  6 10:02 .\n"
-            "drwxr-xr-x 3 student student 4096 Oct  6 10:02 ..\n"
-            "-rw-r--r-- 1 student student    0 Oct  6 10:02 evidence.txt"),
+            "drwxr-xr-x 2 learner learner 4096 Oct  6 10:02 .\n"
+            "drwxr-xr-x 3 learner learner 4096 Oct  6 10:02 ..\n"
+            "-rw-r--r-- 1 learner learner    0 Oct  6 10:02 evidence.txt"),
         t("evidence.txt has size 0 because it is empty. The d at the start of the first two lines "
           "marks directories, the - at the start of the last line marks a regular file."),
         callout("important", "Security mindset",

@@ -40,12 +40,32 @@ const storage = {
   },
 }
 
-export default function LabPanel({ slug, onEnvironmentChange }) {
+function timeLeft(expiresAt, now) {
+  if (!expiresAt) return null
+  const seconds = Math.floor((new Date(expiresAt).getTime() - now) / 1000)
+  if (seconds <= 0) return 'expired'
+  const hours = Math.floor(seconds / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+  return hours > 0 ? `${hours}h ${minutes}m left` : `${minutes}m left`
+}
+
+/**
+ * A disposable lab machine for a lesson: Start Machine, machine list,
+ * terminal and controls. `children` render at the bottom of the frame, so a
+ * lesson can put its required question right under the terminal.
+ */
+export default function LabPanel({ slug, onEnvironmentChange, children }) {
   const storageKey = `nightbreach.lab.${slug}`
   const [lab, setLab] = useState(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
+  const [now, setNow] = useState(() => Date.now())
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30000)
+    return () => clearInterval(timer)
+  }, [])
 
   const adopt = useCallback(
     (environment) => {
@@ -84,6 +104,13 @@ export default function LabPanel({ slug, onEnvironmentChange }) {
     }
   }, [storageKey, adopt])
 
+  // A machine that passed its expiry is gone on the server; offer a fresh start.
+  useEffect(() => {
+    if (lab?.expires_at && new Date(lab.expires_at).getTime() <= now) {
+      adopt(null)
+    }
+  }, [lab, now, adopt])
+
   async function run(label, action) {
     setBusy(label)
     setError('')
@@ -111,32 +138,43 @@ export default function LabPanel({ slug, onEnvironmentChange }) {
   if (loading) {
     return (
       <div className="flex items-center gap-3 rounded-xl border border-slate-800 p-5 text-sm text-slate-500">
-        <Loader2 className="h-4 w-4 animate-spin" /> Checking for a running lab...
+        <Loader2 className="h-4 w-4 animate-spin" /> Checking for a running machine...
       </div>
     )
   }
 
   if (!lab) {
     return (
-      <div className="rounded-xl border border-slate-800 bg-slate-950/30 p-6 text-center">
-        <p className="text-sm text-slate-400">
-          Launch a private attack machine and target server for this lesson.
-          The lab is disposable and isolated from everyone else.
-        </p>
-        <button
-          type="button"
-          onClick={launch}
-          disabled={busy === 'launch'}
-          className="mt-4 inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white transition enabled:hover:bg-blue-500 disabled:opacity-60"
-        >
-          {busy === 'launch' ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Play className="h-4 w-4" />
-          )}
-          {busy === 'launch' ? 'Starting lab...' : 'Launch Lab'}
-        </button>
-        {error && <p className="mt-3 text-sm text-red-300">{error}</p>}
+      <div className="space-y-4">
+        <div className="rounded-xl border border-slate-800 bg-slate-950/30 p-6 text-center">
+          <p className="mx-auto max-w-xl text-sm text-slate-400">
+            Start a private, disposable machine for this lesson. It is isolated
+            from every other learner and is removed automatically when it
+            expires.
+          </p>
+          <button
+            type="button"
+            onClick={launch}
+            disabled={busy === 'launch'}
+            className="mt-4 inline-flex items-center gap-2 rounded-lg bg-blue-600 px-6 py-3 text-sm font-semibold text-white transition enabled:hover:bg-blue-500 disabled:opacity-60"
+          >
+            {busy === 'launch' ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Play className="h-4 w-4" />
+            )}
+            {busy === 'launch'
+              ? 'Starting machine... (about 10 seconds)'
+              : 'Start Machine'}
+          </button>
+          {error && <p className="mt-3 text-sm text-red-300">{error}</p>}
+        </div>
+
+        <div className="flex h-[200px] items-center justify-center rounded-xl border border-dashed border-slate-800 bg-[#030914] text-sm text-slate-600">
+          Your terminal appears here after the machine starts.
+        </div>
+
+        {children}
       </div>
     )
   }
@@ -144,82 +182,112 @@ export default function LabPanel({ slug, onEnvironmentChange }) {
   const running = RUNNING.includes(lab.state)
   const attacker = lab.machines.find((machine) => machine.role === 'attack')
   const working = Boolean(busy)
+  const remaining = timeLeft(lab.expires_at, now)
 
   return (
-    <div className="space-y-4 rounded-xl border border-slate-800 bg-slate-950/30 p-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <div className="font-semibold text-white">{lab.lab_name}</div>
-          <div className="mt-0.5 text-xs text-slate-500">
-            {lab.network_subnet && `Network ${lab.network_subnet}`}
-            {lab.expires_at &&
-              ` · expires ${new Date(lab.expires_at).toLocaleTimeString()}`}
-          </div>
-        </div>
-        <span
-          className={`rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-wider ${
-            running
-              ? 'border-emerald-500/30 text-emerald-400'
-              : 'border-orange-500/30 text-orange-400'
-          }`}
-        >
-          {lab.state}
-        </span>
-      </div>
-
-      <div className="grid gap-3 sm:grid-cols-2">
-        {lab.machines.map((machine) => (
-          <div
-            key={machine.name}
-            className="flex items-start gap-3 rounded-lg border border-slate-800 p-3"
-          >
-            {machine.role === 'attack' ? (
-              <Monitor className="mt-0.5 h-5 w-5 text-blue-400" />
-            ) : (
-              <Target className="mt-0.5 h-5 w-5 text-red-400" />
-            )}
-            <div className="min-w-0">
-              <div className="text-sm font-medium text-slate-200">{machine.title}</div>
-              <div className="mt-0.5 font-mono text-xs text-slate-500">
-                {machine.address ?? 'Address hidden: discover it by scanning the network'}
-              </div>
+    <div className="space-y-4">
+      <div className="space-y-4 rounded-xl border border-slate-800 bg-slate-950/30 p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="font-semibold text-white">{lab.lab_name}</div>
+            <div className="mt-0.5 text-xs text-slate-500">
+              {lab.network_subnet && `Network ${lab.network_subnet}`}
+              {remaining && ` · ${remaining}`}
             </div>
           </div>
-        ))}
-      </div>
-
-      {lab.objectives.map((objective) => (
-        <div key={objective.id} className="rounded-lg border border-blue-500/20 bg-blue-500/5 p-3">
-          <div className="flex justify-between text-sm font-medium text-slate-200">
-            <span>{objective.title}</span>
-            <span className="text-xs text-slate-500">{objective.points} pts</span>
-          </div>
-          <p className="mt-1 text-xs leading-5 text-slate-400">{objective.description}</p>
+          <span
+            className={`rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-wider ${
+              running
+                ? 'border-emerald-500/30 text-emerald-400'
+                : 'border-orange-500/30 text-orange-400'
+            }`}
+          >
+            {lab.state}
+          </span>
         </div>
-      ))}
 
-      <div className="flex flex-wrap gap-2">
-        {running ? (
-          <>
-            <ControlButton onClick={control('stop', stopEnvironment)} disabled={working} icon={Square}>
-              Stop
+        <div className="grid gap-3 sm:grid-cols-2">
+          {lab.machines.map((machine) => (
+            <div
+              key={machine.name}
+              className="flex items-start gap-3 rounded-lg border border-slate-800 p-3"
+            >
+              {machine.role === 'attack' ? (
+                <Monitor className="mt-0.5 h-5 w-5 text-blue-400" />
+              ) : (
+                <Target className="mt-0.5 h-5 w-5 text-red-400" />
+              )}
+              <div className="min-w-0">
+                <div className="text-sm font-medium text-slate-200">
+                  {machine.title}
+                </div>
+                <div className="mt-0.5 font-mono text-xs text-slate-500">
+                  {machine.address ??
+                    'Address hidden: discover it by scanning the network'}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {lab.objectives.map((objective) => (
+          <div
+            key={objective.id}
+            className="rounded-lg border border-blue-500/20 bg-blue-500/5 p-3"
+          >
+            <div className="flex justify-between text-sm font-medium text-slate-200">
+              <span>{objective.title}</span>
+              <span className="text-xs text-slate-500">
+                {objective.points} pts
+              </span>
+            </div>
+            <p className="mt-1 text-xs leading-5 text-slate-400">
+              {objective.description}
+            </p>
+          </div>
+        ))}
+
+        <div className="flex flex-wrap gap-2">
+          {running ? (
+            <>
+              <ControlButton
+                onClick={control('stop', stopEnvironment)}
+                disabled={working}
+                icon={Square}
+              >
+                Stop
+              </ControlButton>
+              <ControlButton
+                onClick={control('reset', resetEnvironment)}
+                disabled={working}
+                icon={RotateCcw}
+              >
+                Reset
+              </ControlButton>
+            </>
+          ) : (
+            <ControlButton
+              onClick={control('start', startEnvironment)}
+              disabled={working}
+              icon={Play}
+            >
+              Start Machine
             </ControlButton>
-            <ControlButton onClick={control('reset', resetEnvironment)} disabled={working} icon={RotateCcw}>
-              Reset
-            </ControlButton>
-          </>
-        ) : (
-          <ControlButton onClick={control('start', startEnvironment)} disabled={working} icon={Play}>
-            Start
+          )}
+          <ControlButton
+            onClick={control('terminate', terminateEnvironment)}
+            disabled={working}
+            icon={Trash2}
+          >
+            End lab
           </ControlButton>
-        )}
-        <ControlButton onClick={control('terminate', terminateEnvironment)} disabled={working} icon={Trash2}>
-          End lab
-        </ControlButton>
-        {working && <Loader2 className="h-5 w-5 animate-spin self-center text-blue-400" />}
-      </div>
+          {working && (
+            <Loader2 className="h-5 w-5 animate-spin self-center text-blue-400" />
+          )}
+        </div>
 
-      {error && <p className="text-sm text-red-300">{error}</p>}
+        {error && <p className="text-sm text-red-300">{error}</p>}
+      </div>
 
       {attacker && (
         <LabTerminal
@@ -228,6 +296,8 @@ export default function LabPanel({ slug, onEnvironmentChange }) {
           active={running}
         />
       )}
+
+      {children}
     </div>
   )
 }
