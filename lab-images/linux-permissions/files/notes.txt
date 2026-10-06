@@ -1,0 +1,2 @@
+Backup schedule: nightly at 02:00. Retention: 7 days.
+Operator: webadmin. Questions go to the ops team.

@@ -8,10 +8,13 @@ from docker.errors import APIError, NotFound
 from .provider import (
     RuntimeCommandResult,
     RuntimeMachine,
+    RuntimeMachineLimits,
     RuntimeNetwork,
     RuntimeNetworkAttachment,
     RuntimeProvider,
 )
+
+MANAGED_LABELS = {"nightbreach.managed": "true"}
 
 
 class DockerRuntimeError(RuntimeError):
@@ -30,8 +33,9 @@ class DockerRuntimeProvider(RuntimeProvider):
         name: str,
         subnet: str | None = None,
         gateway: str | None = None,
+        internal: bool = True,
     ) -> RuntimeNetwork:
-        ipam_pool = None
+        ipam_config = None
 
         if subnet is not None:
             pool_kwargs: dict[str, str] = {"subnet": subnet}
@@ -39,20 +43,19 @@ class DockerRuntimeProvider(RuntimeProvider):
             if gateway is not None:
                 pool_kwargs["gateway"] = gateway
 
-            ipam_pool = docker.types.IPAMPool(**pool_kwargs)
-
-        ipam_config = None
-
-        if ipam_pool is not None:
             ipam_config = docker.types.IPAMConfig(
-                pool_configs=[ipam_pool]
+                pool_configs=[docker.types.IPAMPool(**pool_kwargs)]
             )
 
         try:
+            # internal=True removes outbound NAT: lab machines can talk to
+            # each other but not to the internet or the host's networks.
             network = self.client.networks.create(
                 name=name,
                 driver="bridge",
                 ipam=ipam_config,
+                internal=internal,
+                labels=dict(MANAGED_LABELS),
             )
         except APIError as exc:
             raise DockerRuntimeError(
@@ -81,32 +84,98 @@ class DockerRuntimeProvider(RuntimeProvider):
         name: str,
         image: str,
         network_attachments: Sequence[RuntimeNetworkAttachment],
+        limits: RuntimeMachineLimits | None = None,
+        command: Sequence[str] | None = None,
     ) -> RuntimeMachine:
-        try:
-            container = self.client.containers.create(
-                image=image,
-                name=name,
-                detach=True,
+        if not network_attachments:
+            raise DockerRuntimeError(
+                "A machine requires at least one network attachment."
             )
 
-            for attachment in network_attachments:
-                network = self.client.networks.get(
-                    attachment.network_id
-                )
+        limits = limits or RuntimeMachineLimits()
+        container_id: str | None = None
 
+        try:
+            networks = [
+                self.client.networks.get(attachment.network_id)
+                for attachment in network_attachments
+            ]
+            first_network = networks[0]
+
+            host_config = self.client.api.create_host_config(
+                # Created directly on the lab network, never on the default
+                # bridge, so there is no path to other labs or the host.
+                network_mode=first_network.name,
+                mem_limit=limits.memory,
+                memswap_limit=limits.memory,
+                nano_cpus=int(limits.cpus * 1_000_000_000),
+                pids_limit=limits.pids,
+                cap_drop=["ALL"],
+                cap_add=list(limits.capabilities),
+                security_opt=(
+                    ["no-new-privileges:true"]
+                    if limits.no_new_privileges
+                    else []
+                ),
+                privileged=False,
+                read_only=limits.read_only_rootfs,
+                tmpfs=(
+                    {"/tmp": "rw,nosuid,size=64m"}
+                    if limits.read_only_rootfs
+                    else None
+                ),
+                init=True,
+                ipc_mode="private",
+                restart_policy={"Name": "no"},
+                log_config=docker.types.LogConfig(
+                    type=docker.types.LogConfig.types.JSON,
+                    config={"max-size": "1m", "max-file": "1"},
+                ),
+            )
+
+            networking_config = self.client.api.create_networking_config(
+                {
+                    first_network.name: self.client.api.create_endpoint_config(
+                        ipv4_address=network_attachments[0].ipv4_address,
+                    )
+                }
+            )
+
+            response = self.client.api.create_container(
+                image=image,
+                command=list(command) if command else None,
+                name=name,
+                user=limits.user,
+                labels=dict(MANAGED_LABELS),
+                host_config=host_config,
+                networking_config=networking_config,
+                stdin_open=True,
+                tty=True,
+                detach=True,
+            )
+            container_id = response["Id"]
+            container = self.client.containers.get(container_id)
+
+            for attachment, network in zip(
+                network_attachments[1:],
+                networks[1:],
+            ):
                 connect_kwargs = {}
 
                 if attachment.ipv4_address is not None:
-                    connect_kwargs["ipv4_address"] = (
-                        attachment.ipv4_address
-                    )
+                    connect_kwargs["ipv4_address"] = attachment.ipv4_address
 
-                network.connect(
-                    container,
-                    **connect_kwargs,
-                )
+                network.connect(container, **connect_kwargs)
 
         except (APIError, NotFound) as exc:
+            if container_id is not None:
+                try:
+                    self.client.containers.get(container_id).remove(
+                        force=True
+                    )
+                except (APIError, NotFound):
+                    pass
+
             raise DockerRuntimeError(
                 f"Failed to create Docker machine '{name}'."
             ) from exc
@@ -180,22 +249,13 @@ class DockerRuntimeProvider(RuntimeProvider):
         try:
             container = self.client.containers.get(machine_id)
 
-            if timeout is None:
-                result = container.exec_run(
-                    list(command),
-                    stdout=True,
-                    stderr=True,
-                )
-            else:
-                # Docker's exec API does not provide a portable per-command
-                # timeout through exec_run itself. The timeout is therefore
-                # handled by the caller/runtime boundary rather than passed
-                # as an unsupported Docker SDK argument.
-                result = container.exec_run(
-                    list(command),
-                    stdout=True,
-                    stderr=True,
-                )
+            # Docker's exec API has no portable per-command timeout; callers
+            # bound runtime with the command itself (e.g. ping -W).
+            result = container.exec_run(
+                list(command),
+                stdout=True,
+                stderr=True,
+            )
 
         except (APIError, NotFound) as exc:
             raise DockerRuntimeError(

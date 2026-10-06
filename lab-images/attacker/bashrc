@@ -1,0 +1,9 @@
+# NightBreach attack machine
+case $- in *i*) ;; *) return ;; esac
+PS1='\[\e[1;32m\]learner@attacker\[\e[0m\]:\[\e[1;34m\]\w\[\e[0m\]$ '
+alias ll='ls -alF'
+cat <<'BANNER'
+  NIGHTBREACH ATTACK MACHINE
+  Tools: nmap nc curl ssh sshpass ping ip
+  Stay inside your lab network. Happy hacking.
+BANNER

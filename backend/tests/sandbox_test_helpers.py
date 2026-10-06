@@ -39,6 +39,7 @@ class FakeRuntime(RuntimeProvider):
         self.created_networks: list[RuntimeNetwork] = []
         self.created_machines: list[RuntimeMachine] = []
 
+        self.machine_limits: dict[str, object | None] = {}
         self.fail_create_machine = False
         self.fail_start_machine = False
         self.fail_execute_command = False
@@ -62,6 +63,7 @@ class FakeRuntime(RuntimeProvider):
         name: str,
         subnet: str | None = None,
         gateway: str | None = None,
+        internal: bool = True,
     ) -> RuntimeNetwork:
         network_id = f"network-{self._next_network_id}"
         self._next_network_id += 1
@@ -97,7 +99,11 @@ class FakeRuntime(RuntimeProvider):
         name: str,
         image: str,
         network_attachments: Sequence[RuntimeNetworkAttachment],
+        limits: object | None = None,
+        command: Sequence[str] | None = None,
     ) -> RuntimeMachine:
+        self.machine_limits[name] = limits
+
         if self.fail_create_machine:
             raise RuntimeError("Fake machine creation failed.")
 
