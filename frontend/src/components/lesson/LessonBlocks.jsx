@@ -19,6 +19,7 @@ async function copyText(text) {
     // fall through to the legacy path
   }
 
+  // Plain-HTTP origins such as http://192.168.x.x have no navigator.clipboard.
   const area = document.createElement('textarea')
   area.value = text
   area.style.position = 'fixed'
@@ -26,24 +27,24 @@ async function copyText(text) {
   document.body.appendChild(area)
   area.select()
 
+  let ok = false
   try {
-    return document.execCommand('copy')
+    ok = document.execCommand('copy')
   } catch {
-    return false
-  } finally {
-    document.body.removeChild(area)
+    ok = false
   }
+
+  document.body.removeChild(area)
+  return ok
 }
 
 function LessonHeading({ content }) {
   const text = content.text || ''
   if (Number(content.level) >= 3) {
-    return (
-      <h3 className="pt-2 text-lg font-semibold text-white">{text}</h3>
-    )
+    return <h3 className="pt-2 text-lg font-semibold text-slate-900">{text}</h3>
   }
   return (
-    <h2 className="border-b border-slate-800/80 pb-2 pt-4 text-2xl font-bold text-white">
+    <h2 className="border-b border-slate-200 pb-2 pt-4 text-2xl font-bold text-slate-900">
       {text}
     </h2>
   )
@@ -51,7 +52,7 @@ function LessonHeading({ content }) {
 
 function LessonText({ content }) {
   return (
-    <p className="whitespace-pre-line text-[15px] leading-7 text-slate-300">
+    <p className="whitespace-pre-line text-[15px] leading-7 text-slate-700">
       {content.text}
     </p>
   )
@@ -64,6 +65,7 @@ function CodeBlock({ content }) {
   const code = content.code ?? content.text ?? ''
   const language = String(content.language || 'text').toLowerCase()
   const isShell = SHELL_LANGUAGES.includes(language)
+  const breakdown = Array.isArray(content.breakdown) ? content.breakdown : []
 
   async function handleCopy() {
     if (await copyText(code)) {
@@ -73,7 +75,7 @@ function CodeBlock({ content }) {
   }
 
   return (
-    <div className="overflow-hidden rounded-xl border border-slate-800 bg-[#030914]">
+    <div className="overflow-hidden rounded-xl border border-slate-800 bg-[#030914] shadow-sm">
       <div className="flex items-center justify-between border-b border-slate-800 px-4 py-2">
         <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
           {language}
@@ -93,22 +95,51 @@ function CodeBlock({ content }) {
       </div>
 
       <pre className="nb-scrollbar overflow-x-auto p-4 font-mono text-sm leading-7 text-emerald-300">
-        {code.split('\n').map((line, index) => (
-          <div key={index}>
-            {isShell && (
-              <span className="select-none text-slate-600">$ </span>
-            )}
-            {line}
-          </div>
-        ))}
+        {code.split('\n').map((line, index) => {
+          const isCommand =
+            isShell && line.trim() !== '' && !line.trim().startsWith('#')
+          return (
+            <div key={index}>
+              {isCommand && (
+                <span className="select-none text-slate-600">$ </span>
+              )}
+              {line === '' ? '\u00a0' : line}
+            </div>
+          )
+        })}
       </pre>
+
+      {breakdown.length > 0 && (
+        <div className="border-t border-slate-800 bg-slate-900/60 px-4 py-3">
+          <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+            What each part does
+          </div>
+          <dl className="space-y-2.5">
+            {breakdown.map((item, index) => (
+              <div
+                key={index}
+                className="grid gap-1 sm:grid-cols-[minmax(0,190px)_minmax(0,1fr)] sm:gap-4"
+              >
+                <dt>
+                  <code className="rounded bg-slate-800 px-1.5 py-0.5 font-mono text-[13px] text-cyan-300">
+                    {item.part}
+                  </code>
+                </dt>
+                <dd className="text-sm leading-6 text-slate-300">
+                  {item.meaning}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      )}
     </div>
   )
 }
 
 function TerminalOutput({ content }) {
   return (
-    <div className="overflow-hidden rounded-xl border border-slate-800 bg-black/60">
+    <div className="overflow-hidden rounded-xl border border-slate-800 bg-black shadow-sm">
       <div className="flex items-center gap-2 border-b border-slate-800 px-4 py-2">
         <Terminal className="h-3.5 w-3.5 text-slate-500" />
         <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
@@ -125,23 +156,23 @@ function TerminalOutput({ content }) {
 const CALLOUT_STYLES = {
   important: {
     icon: ShieldAlert,
-    box: 'border-blue-500/30 bg-blue-500/5',
-    accent: 'text-blue-400',
+    box: 'border-blue-200 bg-blue-50',
+    accent: 'text-blue-700',
   },
   tip: {
     icon: Lightbulb,
-    box: 'border-emerald-500/30 bg-emerald-500/5',
-    accent: 'text-emerald-400',
+    box: 'border-emerald-200 bg-emerald-50',
+    accent: 'text-emerald-700',
   },
   warning: {
     icon: TriangleAlert,
-    box: 'border-orange-500/30 bg-orange-500/5',
-    accent: 'text-orange-400',
+    box: 'border-amber-200 bg-amber-50',
+    accent: 'text-amber-700',
   },
   info: {
     icon: Info,
-    box: 'border-slate-700 bg-slate-800/20',
-    accent: 'text-slate-300',
+    box: 'border-slate-200 bg-slate-50',
+    accent: 'text-slate-700',
   },
 }
 
@@ -160,7 +191,7 @@ function Callout({ content }) {
             {content.title}
           </div>
         )}
-        <p className="mt-1 text-sm leading-6 text-slate-300">
+        <p className="mt-1 whitespace-pre-line text-sm leading-6 text-slate-700">
           {content.text}
         </p>
       </div>
@@ -174,7 +205,7 @@ function UnsupportedBlock({ block }) {
   }
 
   return (
-    <div className="rounded-lg border border-dashed border-slate-800 p-3 text-xs text-slate-600">
+    <div className="rounded-lg border border-dashed border-slate-300 p-3 text-xs text-slate-500">
       Unsupported content block: {String(block.block_type)}
     </div>
   )
@@ -195,15 +226,16 @@ export default function LessonBlocks({ blocks }) {
   )
 
   return (
-    <div className="space-y-5">
-      {ordered.map((block) => {
+    <div className="space-y-5 rounded-2xl bg-white p-6 text-slate-700 shadow-sm ring-1 ring-slate-200 sm:p-8">
+      {ordered.map((block, index) => {
         const Component =
           BLOCK_COMPONENTS[String(block.block_type || '').toUpperCase()]
+        const key = block.id ?? index
 
         return Component ? (
-          <Component key={block.id} content={block.content || {}} />
+          <Component key={key} content={block.content || {}} />
         ) : (
-          <UnsupportedBlock key={block.id} block={block} />
+          <UnsupportedBlock key={key} block={block} />
         )
       })}
     </div>

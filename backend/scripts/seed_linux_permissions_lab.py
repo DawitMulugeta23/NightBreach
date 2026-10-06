@@ -45,54 +45,9 @@ CHALLENGE_SLUG = "linux-file-permissions-lab"
 
 B = LessonContentBlockType
 
-BLOCKS = [
-    (B.HEADING, {"text": "Who is allowed to do what?"}),
-    (B.TEXT, {"text": (
-        "Every file on a Linux system has an owner, a group and a set of permissions. "
-        "Permissions are split into three classes - the owner (user), the group and "
-        "everyone else (others) - and each class can be given read (r), write (w) and "
-        "execute (x) rights."
-    )}),
-    (B.CODE, {"language": "bash", "code": "ls -l notes.txt"}),
-    (B.TERMINAL_OUTPUT, {"text": "-rw-r--r-- 1 alice staff 220 Oct  6 09:12 notes.txt"}),
-    (B.TEXT, {"text": (
-        "Read the permission string from left to right. The first character is the file "
-        "type. The next nine are three groups of three: owner (rw-), group (r--) and "
-        "others (r--). Here the owner can read and write, while the group and everybody "
-        "else can only read."
-    )}),
-    (B.HEADING, {"text": "Changing ownership and permissions"}),
-    (B.CODE, {"language": "bash", "code": (
-        "chmod 640 report.txt         # owner rw-, group r--, others ---\n"
-        "chown alice:staff report.txt # set the owner and the group\n"
-        "umask                        # permissions removed from newly created files"
-    )}),
-    (B.CALLOUT, {"type": "important", "title": "Cybersecurity connection", "text": (
-        "Overly permissive files are one of the most common real-world findings. A backup, "
-        "a configuration file or a key that everyone can read turns any low-privilege "
-        "account into a source of secrets."
-    )}),
-    (B.HEADING, {"text": "Lab: find the exposed file"}),
-    (B.TEXT, {"text": (
-        "You get two machines on a private network: an attack machine, which is the "
-        "terminal you control, and a target server. Find a file on the target whose "
-        "permissions expose sensitive data and recover the flag stored in it."
-    )}),
-    (B.TEXT, {"text": (
-        "1. Launch the lab and open the terminal on the attack machine.\n"
-        "2. The lab network is shown next to the machines. Find the target by scanning it.\n"
-        "3. Log in to the target over SSH as student with the password Student#2024.\n"
-        "4. Look for places where backups are kept and compare the permissions of the files.\n"
-        "5. Submit the flag you recover. It looks like NB{...}."
-    )}),
-    (B.CALLOUT, {"type": "tip", "title": "Hints", "text": (
-        "nmap -sn lists the live hosts on a network. ls -l shows permissions. "
-        "cat prints a file you are allowed to read."
-    )}),
-    (B.CALLOUT, {"type": "warning", "title": "The lab is disposable", "text": (
-        "The attack machine can only reach the target. If you break something, reset the lab."
-    )}),
-]
+from lessons.linux_file_permissions import BLOCKS as _BLOCK_DATA  # noqa: E402
+
+BLOCKS = [(B[name], content) for name, content in _BLOCK_DATA]
 
 
 async def get_or_create(session, model, **filters):

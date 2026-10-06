@@ -15,6 +15,11 @@ from uuid import UUID
 
 DEFAULT_TTL_SECONDS = 30
 DEFAULT_MAX_OUTSTANDING = 1000
+DEFAULT_MAX_PER_LEARNER = 5
+
+
+class TicketLimitError(RuntimeError):
+    """Too many terminal tickets are outstanding (globally or for one learner)."""
 
 
 @dataclass(frozen=True)
@@ -32,10 +37,12 @@ class TerminalTicketStore:
         *,
         ttl_seconds: int = DEFAULT_TTL_SECONDS,
         max_outstanding: int = DEFAULT_MAX_OUTSTANDING,
+        max_per_learner: int = DEFAULT_MAX_PER_LEARNER,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.ttl_seconds = ttl_seconds
         self.max_outstanding = max_outstanding
+        self.max_per_learner = max_per_learner
         self._clock = clock
         self._tickets: dict[str, TerminalTicket] = {}
         self._lock = threading.Lock()
@@ -58,7 +65,12 @@ class TerminalTicketStore:
             self._purge_expired(now)
 
             if len(self._tickets) >= self.max_outstanding:
-                raise RuntimeError("Too many outstanding terminal tickets.")
+                raise TicketLimitError("Too many outstanding terminal tickets.")
+
+            held = sum(1 for t in self._tickets.values() if t.learner_id == learner_id)
+
+            if held >= self.max_per_learner:
+                raise TicketLimitError("Too many pending terminal sessions.")
 
             ticket_id = secrets.token_urlsafe(32)
             self._tickets[ticket_id] = TerminalTicket(

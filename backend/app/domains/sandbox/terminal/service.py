@@ -9,7 +9,7 @@ from app.core.errors import ConflictError, NotFoundError
 from app.models.sandbox import EnvironmentState, MachineRole
 
 from ..repositories.environment_repository import EnvironmentRepository
-from .tickets import TerminalTicketStore, ticket_store
+from .tickets import TerminalTicketStore, TicketLimitError, ticket_store
 
 # Learners get a shell on the attack machine only. They reach the target the
 # way an attacker would: over the lab network.
@@ -64,12 +64,15 @@ class TerminalService:
         if machine.runtime_machine_id is None:
             raise ConflictError("The machine is not available.")
 
-        ticket_id = self.store.issue(
-            learner_id=learner_id,
-            environment_id=environment.id,
-            machine_name=machine.name,
-            runtime_machine_id=machine.runtime_machine_id,
-        )
+        try:
+            ticket_id = self.store.issue(
+                learner_id=learner_id,
+                environment_id=environment.id,
+                machine_name=machine.name,
+                runtime_machine_id=machine.runtime_machine_id,
+            )
+        except TicketLimitError as exc:
+            raise ConflictError("Too many terminal sessions. Try again shortly.") from exc
 
         return TerminalSession(
             session_id=ticket_id,

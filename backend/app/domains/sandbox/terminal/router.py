@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import codecs
 import json
+from concurrent.futures import ThreadPoolExecutor
 from collections import defaultdict
 from uuid import UUID
 
@@ -31,6 +32,14 @@ router = APIRouter()
 IDLE_TIMEOUT_SECONDS = 15 * 60
 MAX_MESSAGE_CHARS = 8192
 MAX_SESSIONS_PER_LEARNER = 3
+MAX_TOTAL_SESSIONS = 48
+
+# Every open terminal pins one thread in a blocking read. A dedicated pool keeps
+# that from starving the shared default executor used by lab launch and reset.
+_SHELL_EXECUTOR = ThreadPoolExecutor(
+    max_workers=MAX_TOTAL_SESSIONS,
+    thread_name_prefix="terminal-read",
+)
 
 _active_sessions: dict[UUID, int] = defaultdict(int)
 
@@ -81,7 +90,9 @@ async def _pump_output(websocket: WebSocket, shell) -> None:
     decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
 
     while True:
-        chunk = await asyncio.to_thread(shell.read)
+        chunk = await asyncio.get_running_loop().run_in_executor(
+            _SHELL_EXECUTOR, shell.read
+        )
 
         if chunk is None:
             await websocket.send_json({"type": "exit"})
@@ -156,15 +167,21 @@ async def terminal_socket(
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
-    if _active_sessions[ticket.learner_id] >= MAX_SESSIONS_PER_LEARNER:
+    if (
+        _active_sessions.get(ticket.learner_id, 0) >= MAX_SESSIONS_PER_LEARNER
+        or sum(_active_sessions.values()) >= MAX_TOTAL_SESSIONS
+    ):
         await websocket.close(code=status.WS_1013_TRY_AGAIN_LATER)
         return
 
-    await websocket.accept()
+    # Count the session before the first await so concurrent connections
+    # cannot slip past the limits.
     _active_sessions[ticket.learner_id] += 1
     shell = None
 
     try:
+        await websocket.accept()
+
         try:
             shell = await asyncio.to_thread(
                 runtime.open_shell,
