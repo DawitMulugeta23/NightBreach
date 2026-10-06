@@ -177,7 +177,10 @@ async def terminal_socket(
     # Count the session before the first await so concurrent connections
     # cannot slip past the limits.
     _active_sessions[ticket.learner_id] += 1
-    shell = None
+    shell = runtime.open_shell(
+        machine_id=ticket.runtime_machine_id,
+        username=ticket.learner_username,
+    )
 
     try:
         await websocket.accept()

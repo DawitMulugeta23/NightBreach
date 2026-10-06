@@ -22,9 +22,10 @@ class TicketLimitError(RuntimeError):
     """Too many terminal tickets are outstanding (globally or for one learner)."""
 
 
-@dataclass(frozen=True)
+@dataclass(slots=True)
 class TerminalTicket:
     learner_id: UUID
+    learner_username: str
     environment_id: UUID
     machine_name: str
     runtime_machine_id: str

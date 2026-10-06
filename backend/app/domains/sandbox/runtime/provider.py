@@ -137,6 +137,7 @@ class RuntimeProvider(ABC):
     ) -> RuntimeCommandResult:
         raise NotImplementedError
 
+    @abstractmethod
     def open_shell(
         self,
         *,
@@ -144,5 +145,4 @@ class RuntimeProvider(ABC):
         command: Sequence[str] = ("/bin/bash", "-i"),
         environment: dict[str, str] | None = None,
     ) -> RuntimeShell:
-        """Open an interactive shell. Providers that cannot do this raise."""
         raise NotImplementedError

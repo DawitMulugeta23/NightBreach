@@ -43,7 +43,11 @@ def issue(store, **overrides):
     values.update(overrides)
     return store.issue(**values)
 
-
+def test_terminal_opens_with_learner_username(terminal_app):
+    client, runtime = terminal_app
+    with client.websocket_connect(f"/sandbox/terminal/{new_ticket()}"):
+        pass
+    assert runtime.opened_usernames == ["prog_user"]
 def test_ticket_is_single_use():
     store = TerminalTicketStore()
     ticket_id = issue(store)

@@ -20,7 +20,9 @@ import CTFPage from '../pages/CTF/CTFPage.jsx'
 import ProgressPage from '../pages/Progress/ProgressPage.jsx'
 import RecommendationsPage from '../pages/Recommendations/RecommendationsPage.jsx'
 import SettingsPage from '../pages/Settings/SettingsPage.jsx'
-
+import OnboardingWelcomePage from '../pages/Onboarding/OnboardingWelcomePage.jsx'
+import OnboardingAssessmentPage from '../pages/Onboarding/OnboardingAssessmentPage.jsx'
+import OnboardingResultPage from '../pages/Onboarding/OnboardingResultPage.jsx'
 import ProtectedRoute from './ProtectedRoute.jsx'
 
 const router = createBrowserRouter([
@@ -53,6 +55,18 @@ const router = createBrowserRouter([
       {
         element: <AppLayout />,
         children: [
+          {
+            path: '/onboarding',
+            element: <OnboardingWelcomePage />,
+          },
+          {
+            path: '/onboarding/assessment',
+            element: <OnboardingAssessmentPage />,
+          },
+          {
+            path: '/onboarding/result',
+            element: <OnboardingResultPage />,
+          },
           {
             path: '/dashboard',
             element: <DashboardPage />,

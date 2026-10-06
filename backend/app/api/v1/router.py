@@ -12,7 +12,7 @@ from app.domains.ctf.router import router as ctf_router
 from app.domains.sandbox.router import router as sandbox_router
 from app.domains.sandbox.terminal.router import router as terminal_router
 from app.domains.progress.router import router as progress_router
-
+from app.domains.onboarding.router import router as onboarding_router
 
 router = APIRouter()
 
@@ -28,6 +28,7 @@ async def health() -> dict[str, str]:
 router.include_router(identity_router)
 router.include_router(sandbox_router)
 router.include_router(terminal_router, prefix="/sandbox", tags=["sandbox"])
+router.include_router(onboarding_router)
 router.include_router(progress_router)
 router.include_router(practice_router)
 router.include_router(ctf_router)
