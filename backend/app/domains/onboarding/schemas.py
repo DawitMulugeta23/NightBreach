@@ -1,3 +1,4 @@
+# backend/app/domains/onboarding/schemas.py
 from __future__ import annotations
 
 from datetime import datetime
@@ -11,18 +12,13 @@ class OnboardingStartResponse(BaseModel):
     dimension: str
     prompt: str
     options: list[dict]
-    progress: dict  # {"answered": n, "total": m}
+    progress: dict
 
 
 class OnboardingAnswerRequest(BaseModel):
     question_id: str
     option_ids: list[str] = Field(min_length=1)
-
-
-class OnboardingAnswerResponse(BaseModel):
-    completed: bool
-    next: OnboardingStartResponse | None = None
-    profile: "LearnerProfileResponse | None" = None
+    answer_sheet: dict[str, str] = Field(default_factory=dict)
 
 
 class LearnerProfileResponse(BaseModel):
@@ -43,4 +39,7 @@ class LearnerProfileResponse(BaseModel):
     completed_at: datetime | None
 
 
-OnboardingAnswerResponse.model_rebuild()
+class OnboardingAnswerResponse(BaseModel):
+    completed: bool
+    next: OnboardingStartResponse | None = None
+    profile: LearnerProfileResponse | None = None

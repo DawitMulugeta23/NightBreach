@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import get_current_user
-from app.db.session import get_session
+from app.db.session import get_db_session
 from app.models.user import User
 
 from .schemas import (
@@ -31,13 +31,11 @@ def _question_payload(question, service, answers) -> OnboardingStartResponse:
 @router.post("/start", response_model=OnboardingStartResponse)
 async def start(
     user: User = Depends(get_current_user),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_db_session),
 ) -> OnboardingStartResponse:
     service = OnboardingService(session)
-    profile = await service.get_or_create(user.id)
+    await service.get_or_create(user.id)
 
-    # If already completed, return the first question anyway for re-run flow;
-    # the caller can check `GET /profile` to see completion state.
     answers: dict[str, str] = {}
     question = service.current_question(answers)
     if question is None:
@@ -49,16 +47,14 @@ async def start(
 async def answer(
     payload: OnboardingAnswerRequest,
     user: User = Depends(get_current_user),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_db_session),
 ) -> OnboardingAnswerResponse:
-    """The client must send the full answer set so far, keyed by question id."""
     service = OnboardingService(session)
-    # The client sends the current answer sheet; we accept the multi-select
-    # answer as a comma-joined string for goal/tool questions.
-    answers: dict[str, str] = dict(payload.answer_sheet)
+
+    answers: dict[str, str] = dict(payload.answer_sheet or {})
     answers[payload.question_id] = ",".join(payload.option_ids)
 
-    next_question, summary = await service.answer(
+    next_question, _summary = await service.answer(
         learner_id=user.id, answers=answers
     )
 
@@ -94,7 +90,7 @@ async def answer(
 @router.get("/profile", response_model=LearnerProfileResponse | None)
 async def get_profile(
     user: User = Depends(get_current_user),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_db_session),
 ):
     service = OnboardingService(session)
     profile = await service.get_or_create(user.id)
