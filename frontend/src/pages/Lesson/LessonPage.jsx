@@ -214,36 +214,36 @@ function LessonPage() {
         </aside>
 
         <main className="min-w-0">
-          <article className="nb-card rounded-2xl p-6 sm:p-8">
-            {blocks.length > 0 ? (
-              <LessonBlocks blocks={blocks} />
-            ) : (
-              <p className="text-sm text-slate-500">
-                This lesson does not have content blocks yet.
-              </p>
+          {blocks.length > 0 ? (
+            <LessonBlocks blocks={blocks} />
+          ) : (
+            <p className="text-sm text-slate-500">
+              This lesson does not have content blocks yet.
+            </p>
+          )}
+
+          <section className="mt-8 space-y-4">
+            {lessonPractices.length > 0 && (
+              <h2 className="text-xl font-bold text-white">Practice</h2>
             )}
 
-            <div className="mt-6 space-y-4">
-              {lessonPractices.flatMap((lessonPractice) =>
-                (lessonPractice.practice?.activities ?? []).map(
-                  (activity) => (
-                    <PracticeActivity
-                      key={activity.id}
-                      activity={activity}
-                      required={lessonPractice.required}
-                      onSubmitted={handlePracticeSubmitted}
-                    />
-                  ),
-                ),
-              )}
+            {lessonPractices.flatMap((lessonPractice) =>
+              (lessonPractice.practice?.activities ?? []).map((activity) => (
+                <PracticeActivity
+                  key={activity.id}
+                  activity={activity}
+                  required={lessonPractice.required}
+                  onSubmitted={handlePracticeSubmitted}
+                />
+              )),
+            )}
 
-              {lessonPractices.length === 0 && (
-                <p className="text-xs text-slate-600">
-                  No practice activities are attached to this lesson yet.
-                </p>
-              )}
-            </div>
-          </article>
+            {lessonPractices.length === 0 && (
+              <p className="text-xs text-slate-600">
+                No practice activities are attached to this lesson yet.
+              </p>
+            )}
+          </section>
 
           {location.state?.fromPractice && (
             <div className="mt-4 rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4 text-sm text-emerald-300">

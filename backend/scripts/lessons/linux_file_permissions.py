@@ -40,12 +40,12 @@ BLOCKS = [
     ]),
     out("-rw-r--r-- 1 alice staff 220 Oct  6 09:12 notes.txt"),
     t("Read the line from left to right:\n"
-      "-  first character is the type: - file, d directory, l symbolic link\n"
-      "rw-  permissions of the owner: read and write, no execute\n"
-      "r--  permissions of the group: read only\n"
-      "r--  permissions of everyone else: read only\n"
-      "1  number of hard links      alice  owner      staff  group\n"
-      "220  size in bytes      Oct 6 09:12  last modified      notes.txt  name"),
+      "1. The first character is the type: - is a file, d a directory, l a symbolic link.\n"
+      "2. rw- are the owner's rights: read and write, no execute.\n"
+      "3. r-- are the group's rights: read only.\n"
+      "4. r-- are everyone else's rights: read only.\n"
+      "5. After the permissions come the number of hard links (1), the owner (alice), the "
+      "group (staff), the size in bytes (220), the time of the last change and the file name."),
     code("ls -lah /srv/backups", [
         ("ls", "Lists directory contents."),
         ("-l", "Long format, as above."),
@@ -58,7 +58,10 @@ BLOCKS = [
     h("Permissions as numbers"),
     t("Each right has a value: read = 4, write = 2, execute = 1. Add the ones you want for "
       "each class.\n"
-      "rwx = 4+2+1 = 7      rw- = 4+2 = 6      r-- = 4      --- = 0\n"
+      "rwx = 4 + 2 + 1 = 7\n"
+      "rw- = 4 + 2 = 6\n"
+      "r-- = 4\n"
+      "--- = 0\n"
       "So 640 means: owner rw-, group r--, others ---."),
     code("stat -c '%a %U:%G %n' notes.txt", [
         ("stat", "Shows detailed status information about a file."),
