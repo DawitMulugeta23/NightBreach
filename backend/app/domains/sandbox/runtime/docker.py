@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import socket
 from typing import Sequence
 
 import docker
@@ -12,6 +13,7 @@ from .provider import (
     RuntimeNetwork,
     RuntimeNetworkAttachment,
     RuntimeProvider,
+    RuntimeShell,
 )
 
 MANAGED_LABELS = {"nightbreach.managed": "true"}
@@ -283,3 +285,94 @@ class DockerRuntimeProvider(RuntimeProvider):
             stdout=stdout,
             stderr=stderr,
         )
+
+    def open_shell(
+        self,
+        *,
+        machine_id: str,
+        command: Sequence[str] = ("/bin/bash", "-i"),
+        environment: dict[str, str] | None = None,
+    ) -> RuntimeShell:
+        try:
+            container = self.client.containers.get(machine_id)
+            exec_id = self.client.api.exec_create(
+                container.id,
+                list(command),
+                stdin=True,
+                tty=True,
+                environment={"TERM": "xterm-256color", **(environment or {})},
+            )["Id"]
+            stream = self.client.api.exec_start(
+                exec_id,
+                tty=True,
+                socket=True,
+            )
+        except (APIError, NotFound) as exc:
+            raise DockerRuntimeError(
+                f"Failed to open a shell on Docker machine '{machine_id}'."
+            ) from exc
+
+        return DockerShell(
+            client=self.client,
+            exec_id=exec_id,
+            stream=stream,
+        )
+
+
+class DockerShell(RuntimeShell):
+    """Interactive exec session over Docker's hijacked connection."""
+
+    def __init__(self, *, client, exec_id: str, stream) -> None:
+        self._client = client
+        self._exec_id = exec_id
+        self._stream = stream
+        self._raw = getattr(stream, "_sock", stream)
+        self._closed = False
+
+    def read(self) -> bytes | None:
+        if self._closed:
+            return None
+
+        try:
+            data = self._raw.recv(4096)
+        except (OSError, ValueError):
+            return None
+
+        return data or None
+
+    def write(self, data: bytes) -> None:
+        if self._closed:
+            return
+
+        try:
+            self._raw.sendall(data)
+        except (OSError, ValueError) as exc:
+            raise DockerRuntimeError("Terminal connection closed.") from exc
+
+    def resize(self, cols: int, rows: int) -> None:
+        try:
+            self._client.api.exec_resize(
+                self._exec_id,
+                height=rows,
+                width=cols,
+            )
+        except (APIError, NotFound):
+            pass
+
+    def close(self) -> None:
+        if self._closed:
+            return
+
+        self._closed = True
+
+        # shutdown() wakes a thread blocked in recv(); close() alone may not.
+        try:
+            self._raw.shutdown(socket.SHUT_RDWR)
+        except (OSError, AttributeError):
+            pass
+
+        for handle in (self._raw, self._stream):
+            try:
+                handle.close()
+            except Exception:
+                pass

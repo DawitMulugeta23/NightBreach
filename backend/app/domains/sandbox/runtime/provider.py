@@ -56,6 +56,27 @@ class RuntimeMachineLimits:
     user: str | None = None
 
 
+class RuntimeShell(ABC):
+    """An interactive shell (TTY with stdin/stdout) attached to a machine."""
+
+    @abstractmethod
+    def read(self) -> bytes | None:
+        """Block until output is available. None means the shell has ended."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def write(self, data: bytes) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def resize(self, cols: int, rows: int) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def close(self) -> None:
+        raise NotImplementedError
+
+
 class RuntimeProvider(ABC):
     """Logical runtime interface owned by the Sandbox domain."""
 
@@ -114,4 +135,14 @@ class RuntimeProvider(ABC):
         command: Sequence[str],
         timeout: int | None = None,
     ) -> RuntimeCommandResult:
+        raise NotImplementedError
+
+    def open_shell(
+        self,
+        *,
+        machine_id: str,
+        command: Sequence[str] = ("/bin/bash", "-i"),
+        environment: dict[str, str] | None = None,
+    ) -> RuntimeShell:
+        """Open an interactive shell. Providers that cannot do this raise."""
         raise NotImplementedError
