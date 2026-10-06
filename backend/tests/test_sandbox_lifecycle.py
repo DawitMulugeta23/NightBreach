@@ -506,7 +506,7 @@ class FakeResetRuntime:
         )
         return SimpleNamespace(id=runtime_id, name=name)
 
-    def create_machine(self, *, name, image, network_attachments):
+    def create_machine(self, *, name, image, network_attachments, limits=None, command=None):
         runtime_id = f"new-machine-{name}"
         self.created_machines.append(
             {

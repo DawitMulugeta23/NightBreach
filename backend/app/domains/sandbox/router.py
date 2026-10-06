@@ -23,11 +23,14 @@ from .services.environment_service import (
     NetworkSpec,
 )
 
+from .labs.router import router as labs_router
+
 
 router = APIRouter(
     prefix="/sandbox",
     tags=["sandbox"],
 )
+router.include_router(labs_router)
 
 
 @router.post(

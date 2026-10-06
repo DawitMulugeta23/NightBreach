@@ -10,6 +10,7 @@ from app.models.sandbox import (
     Environment,
     EnvironmentMachine,
     EnvironmentNetwork,
+    EnvironmentState,
     MachineInterface,
 )
 
@@ -102,6 +103,36 @@ class EnvironmentRepository:
         await self.session.flush()
         await self.session.refresh(interface)
         return interface
+
+    async def list_live_lab_environments(
+        self,
+        *,
+        learner_id: UUID,
+    ) -> list[Environment]:
+        result = await self.session.execute(
+            select(Environment).where(
+                Environment.learner_id == learner_id,
+                Environment.lab_slug.is_not(None),
+                Environment.state.not_in(
+                    (
+                        EnvironmentState.DESTROYED,
+                        EnvironmentState.FAILED,
+                        EnvironmentState.TERMINATING,
+                    )
+                ),
+            )
+        )
+        return list(result.scalars().all())
+
+    async def list_allocated_subnets(self) -> set[str]:
+        """Subnets whose runtime network still exists."""
+        result = await self.session.execute(
+            select(EnvironmentNetwork.subnet).where(
+                EnvironmentNetwork.runtime_network_id.is_not(None),
+                EnvironmentNetwork.subnet.is_not(None),
+            )
+        )
+        return set(result.scalars().all())
 
     async def commit(self) -> None:
         await self.session.commit()

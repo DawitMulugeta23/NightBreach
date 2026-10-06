@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from datetime import datetime
 from enum import Enum
 from uuid import UUID
 
 from sqlalchemy import Enum as SAEnum
-from sqlalchemy import ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -60,6 +61,24 @@ class Environment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         nullable=False,
         default=1,
         server_default="1",
+    )
+
+    # Set only for environments launched from the trusted lab registry.
+    lab_slug: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        index=True,
+    )
+
+    # Per-environment secret used to derive flags. Never returned by the API.
+    lab_secret: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+    )
+
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
     )
 
     networks: Mapped[list["EnvironmentNetwork"]] = relationship(

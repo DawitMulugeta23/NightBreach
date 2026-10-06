@@ -57,6 +57,8 @@ class FakeRuntimeProvider(RuntimeProvider):
         name: str,
         image: str,
         network_attachments: Sequence[RuntimeNetworkAttachment],
+        limits=None,
+        command=None,
     ) -> RuntimeMachine:
         if self.fail_on_create_machine:
             raise RuntimeError("machine creation failed")

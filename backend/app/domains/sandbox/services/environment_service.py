@@ -15,7 +15,10 @@ from app.models.sandbox import (
 )
 
 from ..repositories.environment_repository import EnvironmentRepository
+from ..labs.flags import plant_lab_flags
+from ..labs.registry import get_lab
 from ..runtime.provider import (
+    RuntimeMachineLimits,
     RuntimeNetworkAttachment,
     RuntimeProvider,
 )
@@ -84,6 +87,7 @@ class MachineSpec:
     role: MachineRole
     image: str
     interfaces: tuple[InterfaceSpec, ...] = field(default_factory=tuple)
+    limits: RuntimeMachineLimits | None = None
 
 
 class EnvironmentService:
@@ -139,6 +143,26 @@ class EnvironmentService:
         self.session = session
         self.repository = EnvironmentRepository(session)
         self.runtime = runtime
+
+    @staticmethod
+    def _limits_for(
+        environment: Environment,
+        machine_name: str,
+    ) -> RuntimeMachineLimits | None:
+        """Per-machine limits for lab environments, from the trusted registry."""
+        if environment.lab_slug is None:
+            return None
+
+        lab = get_lab(environment.lab_slug)
+
+        if lab is None:
+            return None
+
+        for lab_machine in lab.machines:
+            if lab_machine.name == machine_name:
+                return lab_machine.limits
+
+        return None
 
     async def create_environment(
         self,
@@ -399,6 +423,7 @@ class EnvironmentService:
                     ),
                     image=machine.image,
                     network_attachments=attachments,
+                    limits=self._limits_for(environment, machine.name),
                 )
 
                 machine.runtime_machine_id = runtime_machine.id
@@ -406,6 +431,9 @@ class EnvironmentService:
                 self.runtime.start_machine(
                     machine_id=runtime_machine.id,
                 )
+
+            if environment.lab_slug is not None:
+                await plant_lab_flags(self.runtime, environment)
 
             await self.repository.commit()
 
@@ -665,6 +693,7 @@ class EnvironmentService:
                     ),
                     image=machine_spec.image,
                     network_attachments=tuple(network_attachments),
+                    limits=machine_spec.limits,
                 )
 
                 runtime_machine_ids.append(runtime_machine.id)
