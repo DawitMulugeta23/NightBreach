@@ -795,6 +795,10 @@ class ProgressService:
         Re-evaluate published Lessons associated with a successfully
         completed Practice activity.
 
+        A successful required activity starts lesson progress when needed.
+        The lesson becomes COMPLETED only after every required activity
+        succeeds.
+
         This method does not commit. The caller owns the transaction.
         """
         lesson_ids_result = await self.session.execute(
@@ -838,12 +842,13 @@ class ProgressService:
                 )
             )
 
-            if required_activity_ids - successful_activity_ids:
-                continue
-
             progress = await self.repository.get_lesson_progress(
                 learner_id=learner_id,
                 lesson_id=lesson.id,
+            )
+
+            all_requirements_completed = (
+                not required_activity_ids - successful_activity_ids
             )
 
             if progress is None:
@@ -851,20 +856,33 @@ class ProgressService:
                     id=uuid4(),
                     learner_id=learner_id,
                     lesson_id=lesson.id,
-                    status=ProgressStatus.COMPLETED,
+                    status=(
+                        ProgressStatus.COMPLETED
+                        if all_requirements_completed
+                        else ProgressStatus.IN_PROGRESS
+                    ),
                     started_at=now,
-                    completed_at=now,
+                    completed_at=(
+                        now if all_requirements_completed else None
+                    ),
                     last_activity_at=now,
                 )
                 await self.repository.create_lesson_progress(progress)
             else:
-                progress.status = ProgressStatus.COMPLETED
-                progress.completed_at = progress.completed_at or now
                 progress.started_at = progress.started_at or now
                 progress.last_activity_at = now
 
-            await self._propagate_completion(
-                learner_id=learner_id,
-                lesson=lesson,
-                now=now,
-            )
+                if all_requirements_completed:
+                    progress.status = ProgressStatus.COMPLETED
+                    progress.completed_at = (
+                        progress.completed_at or now
+                    )
+                elif progress.status != ProgressStatus.COMPLETED:
+                    progress.status = ProgressStatus.IN_PROGRESS
+
+            if all_requirements_completed:
+                await self._propagate_completion(
+                    learner_id=learner_id,
+                    lesson=lesson,
+                    now=now,
+                )

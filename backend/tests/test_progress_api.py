@@ -257,7 +257,10 @@ async def test_successful_practice_submission_does_not_complete_lesson_yet(
     )
 
     assert progress_response.status_code == 200
-    assert progress_response.json() is None
+    partial = progress_response.json()
+    assert partial is not None
+    assert partial["status"] == "IN_PROGRESS"
+    assert partial.get("completed_at") is None
 
 
 @pytest.mark.asyncio
@@ -300,7 +303,10 @@ async def test_successful_required_activities_complete_entire_hierarchy(
     )
 
     assert progress_response.status_code == 200
-    assert progress_response.json() is None
+    partial = progress_response.json()
+    assert partial is not None
+    assert partial["status"] == "IN_PROGRESS"
+    assert partial.get("completed_at") is None
 
     # Second required activity.
     attempt_response = await client.post(
