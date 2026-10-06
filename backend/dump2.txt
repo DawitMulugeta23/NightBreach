@@ -1,0 +1,1167 @@
+from __future__ import annotations
+
+from enum import Enum
+from uuid import UUID
+
+from sqlalchemy import Enum as SAEnum
+from sqlalchemy import ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.db.base import Base
+from app.models.base import TimestampMixin, UUIDPrimaryKeyMixin
+
+
+class EnvironmentState(str, Enum):
+    REQUESTED = "requested"
+    PROVISIONING = "provisioning"
+    READY = "ready"
+    ACTIVE = "active"
+    RESETTING = "resetting"
+    STOPPED = "stopped"
+    TERMINATING = "terminating"
+    DESTROYED = "destroyed"
+    FAILED = "failed"
+
+
+class MachineRole(str, Enum):
+    ATTACK = "attack"
+    TARGET = "target"
+    GATEWAY = "gateway"
+
+
+class Environment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "sandbox_environments"
+
+    learner_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id"),
+        nullable=False,
+        index=True,
+    )
+
+    activity_id: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        index=True,
+    )
+
+    state: Mapped[EnvironmentState] = mapped_column(
+        SAEnum(
+            EnvironmentState,
+            name="sandbox_environment_state",
+            native_enum=False,
+        ),
+        nullable=False,
+        default=EnvironmentState.REQUESTED,
+        server_default=EnvironmentState.REQUESTED.value,
+    )
+
+    state_version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+        server_default="1",
+    )
+
+    networks: Mapped[list["EnvironmentNetwork"]] = relationship(
+        back_populates="environment",
+        cascade="all, delete-orphan",
+    )
+
+    machines: Mapped[list["EnvironmentMachine"]] = relationship(
+        back_populates="environment",
+        cascade="all, delete-orphan",
+    )
+
+
+class EnvironmentNetwork(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "sandbox_environment_networks"
+
+    environment_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "sandbox_environments.id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+        index=True,
+    )
+
+    name: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+    )
+
+    subnet: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+    )
+
+    gateway: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+    )
+
+    runtime_network_id: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    environment: Mapped[Environment] = relationship(
+        back_populates="networks",
+    )
+
+    interfaces: Mapped[list["MachineInterface"]] = relationship(
+        back_populates="network",
+    )
+
+
+class EnvironmentMachine(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "sandbox_environment_machines"
+
+    environment_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "sandbox_environments.id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+        index=True,
+    )
+
+    name: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+    )
+
+    role: Mapped[MachineRole] = mapped_column(
+        SAEnum(
+            MachineRole,
+            name="sandbox_machine_role",
+            native_enum=False,
+        ),
+        nullable=False,
+    )
+
+    image: Mapped[str] = mapped_column(
+        String(500),
+        nullable=False,
+    )
+
+    runtime_machine_id: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    environment: Mapped[Environment] = relationship(
+        back_populates="machines",
+    )
+
+    interfaces: Mapped[list["MachineInterface"]] = relationship(
+        back_populates="machine",
+        cascade="all, delete-orphan",
+    )
+
+
+class MachineInterface(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "sandbox_machine_interfaces"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "machine_id",
+            "name",
+            name="uq_sandbox_machine_interface_name",
+        ),
+        UniqueConstraint(
+            "machine_id",
+            "network_id",
+            name="uq_sandbox_machine_network",
+        ),
+    )
+
+    machine_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "sandbox_environment_machines.id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+        index=True,
+    )
+
+    network_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "sandbox_environment_networks.id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+        index=True,
+    )
+
+    name: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+    )
+
+    address: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+    )
+
+    machine: Mapped[EnvironmentMachine] = relationship(
+        back_populates="interfaces",
+    )
+
+    network: Mapped[EnvironmentNetwork] = relationship(
+        back_populates="interfaces",
+    )
+=================== app/models/ctf_challenge.py
+from __future__ import annotations
+
+from enum import Enum
+from uuid import UUID
+
+from sqlalchemy import Enum as SAEnum
+from sqlalchemy import ForeignKey, Integer, JSON, String, Text
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.db.base import Base
+from app.models.base import TimestampMixin, UUIDPrimaryKeyMixin
+
+
+class CTFChallengeMode(str, Enum):
+    GUIDED = "guided"
+    INDEPENDENT = "independent"
+
+
+class CTFChallengeStatus(str, Enum):
+    DRAFT = "draft"
+    PUBLISHED = "published"
+    ARCHIVED = "archived"
+
+
+class CTFChallengeType(str, Enum):
+    FLAG = "flag"
+    OUTPUT_EXTRACTION = "output_extraction"
+    ANSWER = "answer"
+
+
+class CTFChallengeGroup(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "ctf_challenge_groups"
+
+    code: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(
+        String(200),
+        nullable=False,
+    )
+    description: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    position: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+
+    challenges: Mapped[list["CTFChallenge"]] = relationship(
+        back_populates="group",
+    )
+
+
+class CTFChallenge(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "ctf_challenges"
+
+    slug: Mapped[str] = mapped_column(
+        String(150),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    title: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+    description: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
+    objective: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
+    scenario: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    group_id: Mapped[UUID] = mapped_column(
+        ForeignKey("ctf_challenge_groups.id"),
+        nullable=False,
+        index=True,
+    )
+
+    difficulty: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+    )
+
+    mode: Mapped[CTFChallengeMode] = mapped_column(
+        SAEnum(
+            CTFChallengeMode,
+            name="ctf_challenge_mode",
+            native_enum=False,
+        ),
+        nullable=False,
+    )
+
+    status: Mapped[CTFChallengeStatus] = mapped_column(
+        SAEnum(
+            CTFChallengeStatus,
+            name="ctf_challenge_status",
+            native_enum=False,
+        ),
+        nullable=False,
+        default=CTFChallengeStatus.DRAFT,
+        server_default=CTFChallengeStatus.DRAFT.value,
+    )
+
+    challenge_type: Mapped[CTFChallengeType] = mapped_column(
+        SAEnum(
+            CTFChallengeType,
+            name="ctf_challenge_type",
+            native_enum=False,
+        ),
+        nullable=False,
+    )
+
+    # This intentionally remains a bare UUID.
+    # Sandbox owns the actual environment requirement.
+    environment_requirement_id: Mapped[UUID | None] = mapped_column(
+        nullable=True,
+        index=True,
+    )
+
+    # Server-side challenge configuration.
+    #
+    # This may contain validation data such as:
+    # {
+    #     "expected_flag": "...",
+    #     "expected_answer": "...",
+    #     "expected_output": "..."
+    # }
+    #
+    # It must never be returned directly by learner-facing APIs.
+    validation_config: Mapped[dict] = mapped_column(
+        JSON,
+        nullable=False,
+        default=dict,
+        server_default="{}",
+    )
+
+    group: Mapped[CTFChallengeGroup] = relationship(
+        back_populates="challenges",
+    )
+
+    attempts: Mapped[list["CTFAttempt"]] = relationship(
+        back_populates="challenge",
+    )
+=================== app/models/ctf_attempt.py
+from __future__ import annotations
+
+from datetime import datetime
+from enum import Enum
+from typing import TYPE_CHECKING
+from uuid import UUID
+
+from sqlalchemy import DateTime
+from sqlalchemy import Enum as SAEnum
+from sqlalchemy import ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.db.base import Base
+from app.models.base import TimestampMixin, UUIDPrimaryKeyMixin
+
+if TYPE_CHECKING:
+    from app.models.ctf_challenge import CTFChallenge
+    from app.models.ctf_submission import CTFSubmission
+    from app.models.user import User
+
+
+class CTFAttemptStatus(str, Enum):
+    CREATED = "created"
+    STARTED = "started"
+    IN_PROGRESS = "in_progress"
+    SUBMITTED = "submitted"
+    EVALUATING = "evaluating"
+    PASSED = "passed"
+    FAILED = "failed"
+    ENVIRONMENT_FAILED = "environment_failed"
+
+
+class CTFAttempt(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "ctf_attempts"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "learner_id",
+            "challenge_id",
+            "attempt_number",
+            name="uq_ctf_attempt_learner_challenge_number",
+        ),
+    )
+
+    learner_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    challenge_id: Mapped[UUID] = mapped_column(
+        ForeignKey("ctf_challenges.id"),
+        nullable=False,
+        index=True,
+    )
+
+    environment_id: Mapped[UUID | None] = mapped_column(
+        nullable=True,
+        index=True,
+    )
+
+    session_id: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        index=True,
+    )
+
+    attempt_number: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    status: Mapped[CTFAttemptStatus] = mapped_column(
+        SAEnum(
+            CTFAttemptStatus,
+            name="ctf_attempt_status",
+            native_enum=False,
+        ),
+        nullable=False,
+        default=CTFAttemptStatus.CREATED,
+        server_default="created",
+    )
+
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    learner: Mapped["User"] = relationship(
+        "User",
+        lazy="raise",
+    )
+
+    challenge: Mapped["CTFChallenge"] = relationship(
+        "CTFChallenge",
+        lazy="raise",
+    )
+
+    submissions: Mapped[list["CTFSubmission"]] = relationship(
+        "CTFSubmission",
+        back_populates="attempt",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="CTFSubmission.submitted_at",
+    )
+=================== app/domains/ctf/service.py
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from uuid import UUID, uuid4
+
+from app.core.errors import NotFoundError
+from app.domains.ctf.evaluator import evaluate_submission
+from app.domains.ctf.repository import CTFRepository
+from app.domains.ctf.state_machine import validate_attempt_transition
+from app.models.ctf_attempt import CTFAttempt, CTFAttemptStatus
+from app.models.ctf_submission import CTFSubmission
+
+
+class CTFAttemptNotActiveError(Exception):
+    pass
+
+
+class CTFService:
+    def __init__(self, repository: CTFRepository) -> None:
+        self.repository = repository
+
+    async def list_challenges(
+        self,
+        *,
+        group_id: UUID | None = None,
+    ) -> list:
+        return await self.repository.list_published_challenges(
+            group_id=group_id,
+        )
+
+    async def get_challenge(
+        self,
+        *,
+        challenge_id: UUID,
+    ):
+        challenge = await self.repository.get_published_challenge(
+            challenge_id,
+        )
+
+        if challenge is None:
+            raise NotFoundError("CTF challenge not found")
+
+        return challenge
+
+    async def get_challenge_by_slug(
+        self,
+        *,
+        slug: str,
+    ):
+        challenge = await self.repository.get_published_challenge_by_slug(
+            slug,
+        )
+
+        if challenge is None:
+            raise NotFoundError("CTF challenge not found")
+
+        return challenge
+
+    async def start_attempt(
+        self,
+        *,
+        learner_id: UUID,
+        challenge_id: UUID,
+        environment_id: UUID | None = None,
+        session_id: str | None = None,
+    ) -> CTFAttempt:
+        challenge = await self.repository.get_published_challenge(
+            challenge_id,
+        )
+
+        if challenge is None:
+            raise NotFoundError("CTF challenge not found")
+
+        attempt_number = await self.repository.get_next_attempt_number(
+            challenge_id=challenge_id,
+            learner_id=learner_id,
+        )
+
+        now = datetime.now(timezone.utc)
+
+        attempt = CTFAttempt(
+            id=uuid4(),
+            learner_id=learner_id,
+            challenge_id=challenge.id,
+            environment_id=environment_id,
+            session_id=session_id,
+            attempt_number=attempt_number,
+            status=CTFAttemptStatus.CREATED,
+        )
+
+        await self.repository.create_attempt(attempt)
+
+        validate_attempt_transition(
+            attempt.status,
+            CTFAttemptStatus.STARTED,
+        )
+
+        attempt.status = CTFAttemptStatus.STARTED
+        attempt.started_at = now
+
+        await self.repository.session.flush()
+
+        return attempt
+
+    async def mark_in_progress(
+        self,
+        *,
+        attempt_id: UUID,
+        learner_id: UUID,
+    ) -> CTFAttempt:
+        attempt = await self.repository.get_attempt(
+            attempt_id=attempt_id,
+            learner_id=learner_id,
+        )
+
+        if attempt is None:
+            raise NotFoundError("CTF attempt not found")
+
+        if attempt.status == CTFAttemptStatus.IN_PROGRESS:
+            return attempt
+
+        validate_attempt_transition(
+            attempt.status,
+            CTFAttemptStatus.IN_PROGRESS,
+        )
+
+        attempt.status = CTFAttemptStatus.IN_PROGRESS
+
+        await self.repository.session.flush()
+
+        return attempt
+
+    async def submit(
+        self,
+        *,
+        attempt_id: UUID,
+        learner_id: UUID,
+        submission_value: str,
+    ) -> tuple[CTFAttempt, CTFSubmission]:
+        attempt = await self.repository.get_attempt(
+            attempt_id=attempt_id,
+            learner_id=learner_id,
+        )
+
+        if attempt is None:
+            raise NotFoundError("CTF attempt not found")
+
+        if attempt.status in {
+            CTFAttemptStatus.PASSED,
+            CTFAttemptStatus.FAILED,
+            CTFAttemptStatus.ENVIRONMENT_FAILED,
+        }:
+            raise CTFAttemptNotActiveError(
+                "CTF attempt is not active."
+            )
+
+        if attempt.status == CTFAttemptStatus.STARTED:
+            validate_attempt_transition(
+                attempt.status,
+                CTFAttemptStatus.IN_PROGRESS,
+            )
+            attempt.status = CTFAttemptStatus.IN_PROGRESS
+
+        if attempt.status != CTFAttemptStatus.IN_PROGRESS:
+            raise CTFAttemptNotActiveError(
+                "CTF attempt is not active."
+            )
+
+        challenge = await self.repository.get_published_challenge(
+            attempt.challenge_id,
+        )
+
+        if challenge is None:
+            raise NotFoundError("CTF challenge not found")
+
+        now = datetime.now(timezone.utc)
+
+        validate_attempt_transition(
+            attempt.status,
+            CTFAttemptStatus.SUBMITTED,
+        )
+        attempt.status = CTFAttemptStatus.SUBMITTED
+
+        await self.repository.session.flush()
+
+        validate_attempt_transition(
+            attempt.status,
+            CTFAttemptStatus.EVALUATING,
+        )
+        attempt.status = CTFAttemptStatus.EVALUATING
+
+        await self.repository.session.flush()
+
+        # The evaluator reads the authoritative validation configuration
+        # from the persisted challenge. The learner never supplies the
+        # expected answer, expected flag, or accepted values.
+        evaluation = evaluate_submission(
+            challenge=challenge,
+            submission=submission_value,
+        )
+
+        submission = CTFSubmission(
+            id=uuid4(),
+            attempt_id=attempt.id,
+            submission_value=submission_value,
+            submitted_at=now,
+            result=evaluation.result,
+        )
+
+        await self.repository.create_submission(submission)
+
+        if evaluation.passed:
+            validate_attempt_transition(
+                attempt.status,
+                CTFAttemptStatus.PASSED,
+            )
+            attempt.status = CTFAttemptStatus.PASSED
+        else:
+            validate_attempt_transition(
+                attempt.status,
+                CTFAttemptStatus.FAILED,
+            )
+            attempt.status = CTFAttemptStatus.FAILED
+
+        attempt.completed_at = now
+
+        await self.repository.session.flush()
+
+        return attempt, submission
+
+    async def mark_environment_failed(
+        self,
+        *,
+        attempt_id: UUID,
+        learner_id: UUID,
+    ) -> CTFAttempt:
+        attempt = await self.repository.get_attempt(
+            attempt_id=attempt_id,
+            learner_id=learner_id,
+        )
+
+        if attempt is None:
+            raise NotFoundError("CTF attempt not found")
+
+        if attempt.status == CTFAttemptStatus.ENVIRONMENT_FAILED:
+            return attempt
+
+        validate_attempt_transition(
+            attempt.status,
+            CTFAttemptStatus.ENVIRONMENT_FAILED,
+        )
+
+        attempt.status = CTFAttemptStatus.ENVIRONMENT_FAILED
+        attempt.completed_at = datetime.now(timezone.utc)
+
+        await self.repository.session.flush()
+
+        return attempt
+
+    async def list_attempts(
+        self,
+        *,
+        learner_id: UUID,
+        challenge_id: UUID,
+    ) -> list[CTFAttempt]:
+        return await self.repository.list_attempts(
+            challenge_id=challenge_id,
+            learner_id=learner_id,
+        )
+
+    async def get_attempt(
+        self,
+        *,
+        learner_id: UUID,
+        attempt_id: UUID,
+    ) -> CTFAttempt:
+        attempt = await self.repository.get_attempt(
+            attempt_id=attempt_id,
+            learner_id=learner_id,
+        )
+
+        if attempt is None:
+            raise NotFoundError("CTF attempt not found")
+
+        return attempt
+
+    async def list_submissions(
+        self,
+        *,
+        learner_id: UUID,
+        attempt_id: UUID,
+    ) -> list[CTFSubmission]:
+        attempt = await self.repository.get_attempt(
+            attempt_id=attempt_id,
+            learner_id=learner_id,
+        )
+
+        if attempt is None:
+            raise NotFoundError("CTF attempt not found")
+
+        return await self.repository.list_submissions(
+            attempt_id=attempt_id,
+            learner_id=learner_id,
+        )
+=================== app/domains/progress/service.py
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from uuid import UUID, uuid4
+
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.errors import NotFoundError, ValidationError
+from app.models.lesson import Lesson, LessonStatus
+from app.models.lesson_practice import LessonPractice
+from app.models.learning_path import LearningPath, LearningPathStatus
+from app.models.module import Module, ModuleStatus
+from app.models.practice import Practice, PracticeStatus
+from app.models.practice_activity import PracticeActivity
+from app.models.practice_attempt import PracticeAttempt
+from app.models.progress import (
+    LearnerLessonProgress,
+    LearnerLearningPathProgress,
+    LearnerModuleProgress,
+    LearnerRoomProgress,
+    ProgressStatus,
+)
+from app.models.room import Room, RoomStatus
+
+from .repository import ProgressRepository
+
+
+class ProgressService:
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+        self.repository = ProgressRepository(session)
+
+    @staticmethod
+    def _now() -> datetime:
+        return datetime.now(timezone.utc)
+
+    async def get_lesson_progress(
+        self,
+        *,
+        learner_id: UUID,
+        lesson_id: UUID,
+    ) -> LearnerLessonProgress | None:
+        lesson = await self._get_published_lesson(lesson_id)
+
+        if lesson is None:
+            raise NotFoundError("Lesson not found.")
+
+        return await self.repository.get_lesson_progress(
+            learner_id=learner_id,
+            lesson_id=lesson_id,
+        )
+
+    async def get_room_progress(
+        self,
+        *,
+        learner_id: UUID,
+        room_id: UUID,
+    ) -> LearnerRoomProgress | None:
+        room = await self._get_published_room(room_id)
+
+        if room is None:
+            raise NotFoundError("Room not found.")
+
+        return await self.repository.get_room_progress(
+            learner_id=learner_id,
+            room_id=room_id,
+        )
+
+    async def get_module_progress(
+        self,
+        *,
+        learner_id: UUID,
+        module_id: UUID,
+    ) -> LearnerModuleProgress | None:
+        module = await self._get_published_module(module_id)
+
+        if module is None:
+            raise NotFoundError("Module not found.")
+
+        return await self.repository.get_module_progress(
+            learner_id=learner_id,
+            module_id=module_id,
+        )
+
+    async def get_learning_path_progress(
+        self,
+        *,
+        learner_id: UUID,
+        learning_path_id: UUID,
+    ) -> LearnerLearningPathProgress | None:
+        path = await self._get_published_learning_path(
+            learning_path_id
+        )
+
+        if path is None:
+            raise NotFoundError("Learning path not found.")
+
+        return await self.repository.get_learning_path_progress(
+            learner_id=learner_id,
+            learning_path_id=learning_path_id,
+        )
+
+    async def record_lesson_completion(
+        self,
+        *,
+        learner_id: UUID,
+        lesson_id: UUID,
+    ) -> LearnerLessonProgress:
+        lesson = await self._get_published_lesson(lesson_id)
+
+        if lesson is None:
+            raise NotFoundError("Lesson not found.")
+
+        required_activity_ids = await self._get_required_activity_ids(
+            lesson_id
+        )
+
+        successful_activity_ids = await self._get_successful_activity_ids(
+            learner_id=learner_id,
+            activity_ids=required_activity_ids,
+        )
+
+        missing = required_activity_ids - successful_activity_ids
+
+        if missing:
+            raise ValidationError(
+                "Lesson requirements are not yet completed.",
+                details={
+                    "missing_required_activity_ids": [
+                        str(activity_id)
+                        for activity_id in missing
+                    ]
+                },
+            )
+
+        now = self._now()
+
+        progress = await self.repository.get_lesson_progress(
+            learner_id=learner_id,
+            lesson_id=lesson_id,
+        )
+
+        if progress is None:
+            progress = LearnerLessonProgress(
+                id=uuid4(),
+                learner_id=learner_id,
+                lesson_id=lesson_id,
+                status=ProgressStatus.COMPLETED,
+                started_at=now,
+                completed_at=now,
+                last_activity_at=now,
+            )
+            await self.repository.create_lesson_progress(progress)
+        else:
+            progress.status = ProgressStatus.COMPLETED
+            progress.completed_at = (
+                progress.completed_at or now
+            )
+            progress.started_at = progress.started_at or now
+            progress.last_activity_at = now
+
+        await self._propagate_completion(
+            learner_id=learner_id,
+            lesson=lesson,
+            now=now,
+        )
+
+        await self.repository.commit()
+
+        return progress
+
+    async def record_room_completion(
+        self,
+        *,
+        learner_id: UUID,
+        room_id: UUID,
+    ) -> LearnerRoomProgress:
+        room = await self._get_published_room(room_id)
+
+        if room is None:
+            raise NotFoundError("Room not found.")
+
+        complete = await self._is_room_complete(
+            learner_id=learner_id,
+            room_id=room_id,
+        )
+
+        if not complete:
+            raise ValidationError(
+                "Room requirements are not yet completed."
+            )
+
+        now = self._now()
+
+        progress = await self.repository.get_room_progress(
+            learner_id=learner_id,
+            room_id=room_id,
+        )
+
+        if progress is None:
+            progress = LearnerRoomProgress(
+                id=uuid4(),
+                learner_id=learner_id,
+                room_id=room_id,
+                status=ProgressStatus.COMPLETED,
+                started_at=now,
+                completed_at=now,
+                last_activity_at=now,
+            )
+            await self.repository.create_room_progress(progress)
+        else:
+            progress.status = ProgressStatus.COMPLETED
+            progress.completed_at = (
+                progress.completed_at or now
+            )
+            progress.started_at = progress.started_at or now
+            progress.last_activity_at = now
+
+        module = await self._get_published_module(room.module_id)
+
+        if module is not None:
+            await self._propagate_module_completion(
+                learner_id=learner_id,
+                module=module,
+                now=now,
+            )
+
+        await self.repository.commit()
+
+        return progress
+
+    async def record_module_completion(
+        self,
+        *,
+        learner_id: UUID,
+        module_id: UUID,
+    ) -> LearnerModuleProgress:
+        module = await self._get_published_module(module_id)
+
+        if module is None:
+            raise NotFoundError("Module not found.")
+
+        complete = await self._is_module_complete(
+            learner_id=learner_id,
+            module_id=module_id,
+        )
+
+        if not complete:
+            raise ValidationError(
+                "Module requirements are not yet completed."
+            )
+
+        now = self._now()
+
+        progress = await self.repository.get_module_progress(
+            learner_id=learner_id,
+            module_id=module_id,
+        )
+
+        if progress is None:
+            progress = LearnerModuleProgress(
+                id=uuid4(),
+                learner_id=learner_id,
+                module_id=module_id,
+                status=ProgressStatus.COMPLETED,
+                started_at=now,
+                completed_at=now,
+                last_activity_at=now,
+            )
+            await self.repository.create_module_progress(progress)
+        else:
+            progress.status = ProgressStatus.COMPLETED
+            progress.completed_at = (
+                progress.completed_at or now
+            )
+            progress.started_at = progress.started_at or now
+            progress.last_activity_at = now
+
+        path = await self._get_published_learning_path(
+            module.learning_path_id
+        )
+
+        if path is not None:
+            await self._propagate_path_completion(
+                learner_id=learner_id,
+                path=path,
+                now=now,
+            )
+
+        await self.repository.commit()
+
+        return progress
+
+    async def record_learning_path_completion(
+        self,
+        *,
+        learner_id: UUID,
+        learning_path_id: UUID,
+    ) -> LearnerLearningPathProgress:
+        path = await self._get_published_learning_path(
+            learning_path_id
+        )
+
+        if path is None:
+            raise NotFoundError("Learning path not found.")
+
+        complete = await self._is_learning_path_complete(
+            learner_id=learner_id,
+            learning_path_id=learning_path_id,
+        )
+
+        if not complete:
+            raise ValidationError(
+                "Learning path requirements are not yet completed."
+            )
+
+        now = self._now()
+
+        progress = await self.repository.get_learning_path_progress(
+            learner_id=learner_id,
+            learning_path_id=learning_path_id,
+        )
+
+        if progress is None:
+            progress = LearnerLearningPathProgress(
+                id=uuid4(),
+                learner_id=learner_id,
+                learning_path_id=learning_path_id,
+                status=ProgressStatus.COMPLETED,
+                started_at=now,
+                completed_at=now,
+                last_activity_at=now,
+            )
+            await self.repository.create_learning_path_progress(progress)
+        else:
+            progress.status = ProgressStatus.COMPLETED
+            progress.completed_at = (
+                progress.completed_at or now
+            )
+            progress.started_at = progress.started_at or now
+            progress.last_activity_at = now
+
+        await self.repository.commit()
+
+        return progress
+
+    async def _propagate_completion(
+        self,
+        *,
+        learner_id: UUID,
+        lesson: Lesson,
+        now: datetime,
+    ) -> None:
+        room_complete = await self._is_room_complete(
+            learner_id=learner_id,
+            room_id=lesson.room_id,
+        )
+
+        if not room_complete:
+            return
+
+        room_progress = await self.repository.get_room_progress(
+            learner_id=learner_id,
+            room_id=lesson.room_id,
+        )
+
+        if room_progress is None:
+            room_progress = LearnerRoomProgress(
+                id=uuid4(),
+                learner_id=learner_id,
+                room_id=lesson.room_id,
+                status=ProgressStatus.COMPLETED,
+                started_at=now,
+                completed_at=now,
+                last_activity_at=now,
+            )
+            await self.repository.create_room_progress(room_progress)
+        else:
+            room_progress.status = P

@@ -1,0 +1,1585 @@
+=== FILE LIST ===
+app/api/__init__.py
+app/api/v1/__init__.py
+app/api/v1/router.py
+app/domains/sandbox/api/schemas.py
+app/domains/sandbox/dependencies.py
+app/domains/sandbox/__init__.py
+app/domains/sandbox/repositories/environment_repository.py
+app/domains/sandbox/repositories/__init__.py
+app/domains/sandbox/router.py
+app/domains/sandbox/runtime/docker.py
+app/domains/sandbox/runtime/__init__.py
+app/domains/sandbox/runtime/provider.py
+app/domains/sandbox/schemas/__init__.py
+app/domains/sandbox/services/environment_service.py
+app/domains/sandbox/services/__init__.py
+app/domains/sandbox/validators/environment.py
+app/domains/sandbox/validators/__init__.py
+app/domains/sandbox/workers/__init__.py
+app/models/base.py
+app/models/ctf_attempt.py
+app/models/ctf_challenge.py
+app/models/ctf_submission.py
+app/models/__init__.py
+app/models/learning_path.py
+app/models/lesson_content_block.py
+app/models/lesson_practice.py
+app/models/lesson.py
+app/models/module.py
+app/models/practice_activity.py
+app/models/practice_attempt.py
+app/models/practice.py
+app/models/progress.py
+app/models/room.py
+app/models/sandbox.py
+app/models/user.py
+app/repositories/__init__.py
+
+=== HOST ===
+docker 29.8.1
+ Storage Driver: overlayfs
+ Cgroup Driver: systemd
+ Cgroup Version: 2
+ Runtimes: io.containerd.runc.v2 runc
+ Security Options:
+nightbreach/web-01:dev
+nightbreach-web-01:latest
+mde-base:v1
+alpine:latest
+hello-world:latest
+curlimages/curl:8.12.1
+dawitm adm cdrom sudo dip plugdev users lxd docker
+
+=================== app/domains/sandbox/router.py
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.dependencies import get_current_user
+from app.core.errors import NotFoundError
+from app.db.session import get_db_session
+from app.models.user import User
+
+from .api.schemas import (
+    CreateEnvironmentRequest,
+    EnvironmentResponse,
+    EnvironmentValidationResponse,
+    ProvisionEnvironmentRequest,
+)
+from .dependencies import get_runtime_provider
+from .runtime.provider import RuntimeProvider
+from .services.environment_service import (
+    EnvironmentService,
+    InterfaceSpec,
+    MachineSpec,
+    NetworkSpec,
+)
+
+
+router = APIRouter(
+    prefix="/sandbox",
+    tags=["sandbox"],
+)
+
+
+@router.post(
+    "/environments",
+    response_model=EnvironmentResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_environment(
+    request: CreateEnvironmentRequest,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> EnvironmentResponse:
+    service = EnvironmentService(session=session)
+
+    environment = await service.create_environment(
+        learner_id=current_user.id,
+        activity_id=request.activity_id,
+    )
+
+    return EnvironmentResponse.model_validate(environment)
+
+
+@router.get(
+    "/environments/{environment_id}",
+    response_model=EnvironmentResponse,
+)
+async def get_environment(
+    environment_id: UUID,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> EnvironmentResponse:
+    service = EnvironmentService(session=session)
+
+    environment = await service.get_environment(
+        environment_id=environment_id,
+        learner_id=current_user.id,
+    )
+
+    if environment is None:
+        raise NotFoundError("Environment not found.")
+
+    return EnvironmentResponse.model_validate(environment)
+
+
+@router.post(
+    "/environments/{environment_id}/provision",
+    response_model=EnvironmentResponse,
+)
+async def provision_environment(
+    environment_id: UUID,
+    request: ProvisionEnvironmentRequest,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+    runtime: RuntimeProvider = Depends(get_runtime_provider),
+) -> EnvironmentResponse:
+    service = EnvironmentService(
+        session=session,
+        runtime=runtime,
+    )
+
+    networks = tuple(
+        NetworkSpec(
+            name=network.name,
+            subnet=network.subnet,
+            gateway=network.gateway,
+        )
+        for network in request.networks
+    )
+
+    machines = tuple(
+        MachineSpec(
+            name=machine.name,
+            role=machine.role,
+            image=machine.image,
+            interfaces=tuple(
+                InterfaceSpec(
+                    name=interface.name,
+                    network_name=interface.network_name,
+                    address=interface.address,
+                )
+                for interface in machine.interfaces
+            ),
+        )
+        for machine in request.machines
+    )
+
+    environment = await service.provision_environment(
+        environment_id=environment_id,
+        learner_id=current_user.id,
+        networks=networks,
+        machines=machines,
+    )
+
+    return EnvironmentResponse.model_validate(environment)
+
+
+@router.post(
+    "/environments/{environment_id}/start",
+    response_model=EnvironmentResponse,
+)
+async def start_environment(
+    environment_id: UUID,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+    runtime: RuntimeProvider = Depends(get_runtime_provider),
+) -> EnvironmentResponse:
+    service = EnvironmentService(
+        session=session,
+        runtime=runtime,
+    )
+
+    environment = await service.start_environment(
+        environment_id=environment_id,
+        learner_id=current_user.id,
+    )
+
+    return EnvironmentResponse.model_validate(environment)
+
+
+@router.post(
+    "/environments/{environment_id}/reset",
+    response_model=EnvironmentResponse,
+)
+async def reset_environment(
+    environment_id: UUID,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+    runtime: RuntimeProvider = Depends(get_runtime_provider),
+) -> EnvironmentResponse:
+    service = EnvironmentService(
+        session=session,
+        runtime=runtime,
+    )
+
+    environment = await service.reset_environment(
+        environment_id=environment_id,
+        learner_id=current_user.id,
+    )
+
+    return EnvironmentResponse.model_validate(environment)
+
+
+@router.post(
+    "/environments/{environment_id}/stop",
+    response_model=EnvironmentResponse,
+)
+async def stop_environment(
+    environment_id: UUID,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+    runtime: RuntimeProvider = Depends(get_runtime_provider),
+) -> EnvironmentResponse:
+    service = EnvironmentService(
+        session=session,
+        runtime=runtime,
+    )
+
+    environment = await service.stop_environment(
+        environment_id=environment_id,
+        learner_id=current_user.id,
+    )
+
+    return EnvironmentResponse.model_validate(environment)
+
+
+@router.post(
+    "/environments/{environment_id}/validate",
+    response_model=EnvironmentValidationResponse,
+)
+async def validate_environment(
+    environment_id: UUID,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+    runtime: RuntimeProvider = Depends(get_runtime_provider),
+) -> EnvironmentValidationResponse:
+    service = EnvironmentService(
+        session=session,
+        runtime=runtime,
+    )
+
+    result = await service.validate_environment(
+        environment_id=environment_id,
+        learner_id=current_user.id,
+    )
+
+    return EnvironmentValidationResponse(
+        environment_id=environment_id,
+        valid=result.valid,
+        errors=result.errors,
+    )
+
+
+@router.post(
+    "/environments/{environment_id}/terminate",
+    response_model=EnvironmentResponse,
+)
+async def terminate_environment(
+    environment_id: UUID,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+    runtime: RuntimeProvider = Depends(get_runtime_provider),
+) -> EnvironmentResponse:
+    service = EnvironmentService(
+        session=session,
+        runtime=runtime,
+    )
+
+    environment = await service.terminate_environment(
+        environment_id=environment_id,
+        learner_id=current_user.id,
+    )
+
+    return EnvironmentResponse.model_validate(environment)
+
+=================== app/domains/sandbox/api/schemas.py
+from __future__ import annotations
+
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from app.models.sandbox import EnvironmentState, MachineRole
+
+
+class CreateEnvironmentRequest(BaseModel):
+    activity_id: str = Field(min_length=1, max_length=255)
+
+
+class InterfaceSpecRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=50)
+    network_name: str = Field(min_length=1, max_length=100)
+    address: str = Field(min_length=1, max_length=64)
+
+
+class NetworkSpecRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    subnet: str = Field(min_length=1, max_length=64)
+    gateway: str = Field(min_length=1, max_length=64)
+
+
+class MachineSpecRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    role: MachineRole
+    image: str = Field(min_length=1, max_length=500)
+    interfaces: list[InterfaceSpecRequest] = Field(min_length=1)
+
+
+class ProvisionEnvironmentRequest(BaseModel):
+    networks: list[NetworkSpecRequest] = Field(min_length=1)
+    machines: list[MachineSpecRequest] = Field(min_length=1)
+
+
+class EnvironmentResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    learner_id: UUID
+    activity_id: str
+    state: EnvironmentState
+    state_version: int
+
+
+class EnvironmentValidationResponse(BaseModel):
+    environment_id: UUID
+    valid: bool
+    errors: list[str] = Field(default_factory=list)
+
+=================== app/domains/sandbox/dependencies.py
+from app.domains.sandbox.runtime.docker import DockerRuntimeProvider
+from app.domains.sandbox.runtime.provider import RuntimeProvider
+
+
+def get_runtime_provider() -> RuntimeProvider:
+    return DockerRuntimeProvider()
+
+=================== app/domains/sandbox/runtime/provider.py
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from typing import Sequence
+
+
+@dataclass(frozen=True)
+class RuntimeNetwork:
+    id: str
+    name: str
+
+
+@dataclass(frozen=True)
+class RuntimeMachine:
+    id: str
+    name: str
+
+
+@dataclass(frozen=True)
+class RuntimeNetworkAttachment:
+    network_id: str
+    ipv4_address: str | None = None
+
+
+@dataclass(frozen=True)
+class RuntimeCommandResult:
+    exit_code: int
+    stdout: str
+    stderr: str
+
+
+class RuntimeProvider(ABC):
+    """Logical runtime interface owned by the Sandbox domain."""
+
+    @abstractmethod
+    def create_network(
+        self,
+        *,
+        name: str,
+        subnet: str | None = None,
+        gateway: str | None = None,
+    ) -> RuntimeNetwork:
+        raise NotImplementedError
+
+    @abstractmethod
+    def remove_network(self, *, network_id: str) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def create_machine(
+        self,
+        *,
+        name: str,
+        image: str,
+        network_attachments: Sequence[RuntimeNetworkAttachment],
+    ) -> RuntimeMachine:
+        raise NotImplementedError
+
+    @abstractmethod
+    def start_machine(self, *, machine_id: str) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def stop_machine(self, *, machine_id: str) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def remove_machine(self, *, machine_id: str) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def inspect_machine(self, *, machine_id: str) -> dict:
+        raise NotImplementedError
+
+    @abstractmethod
+    def inspect_network(self, *, network_id: str) -> dict:
+        raise NotImplementedError
+
+    @abstractmethod
+    def execute_command(
+        self,
+        *,
+        machine_id: str,
+        command: Sequence[str],
+        timeout: int | None = None,
+    ) -> RuntimeCommandResult:
+        raise NotImplementedError
+
+=================== app/domains/sandbox/runtime/docker.py
+from __future__ import annotations
+
+from typing import Sequence
+
+import docker
+from docker.errors import APIError, NotFound
+
+from .provider import (
+    RuntimeCommandResult,
+    RuntimeMachine,
+    RuntimeNetwork,
+    RuntimeNetworkAttachment,
+    RuntimeProvider,
+)
+
+
+class DockerRuntimeError(RuntimeError):
+    """Base error for Docker runtime operations."""
+
+
+class DockerRuntimeProvider(RuntimeProvider):
+    """Docker implementation of the Sandbox RuntimeProvider."""
+
+    def __init__(self, client: docker.DockerClient | None = None) -> None:
+        self.client = client or docker.from_env()
+
+    def create_network(
+        self,
+        *,
+        name: str,
+        subnet: str | None = None,
+        gateway: str | None = None,
+    ) -> RuntimeNetwork:
+        ipam_pool = None
+
+        if subnet is not None:
+            pool_kwargs: dict[str, str] = {"subnet": subnet}
+
+            if gateway is not None:
+                pool_kwargs["gateway"] = gateway
+
+            ipam_pool = docker.types.IPAMPool(**pool_kwargs)
+
+        ipam_config = None
+
+        if ipam_pool is not None:
+            ipam_config = docker.types.IPAMConfig(
+                pool_configs=[ipam_pool]
+            )
+
+        try:
+            network = self.client.networks.create(
+                name=name,
+                driver="bridge",
+                ipam=ipam_config,
+            )
+        except APIError as exc:
+            raise DockerRuntimeError(
+                f"Failed to create Docker network '{name}'."
+            ) from exc
+
+        return RuntimeNetwork(
+            id=network.id,
+            name=network.name,
+        )
+
+    def remove_network(self, *, network_id: str) -> None:
+        try:
+            network = self.client.networks.get(network_id)
+            network.remove()
+        except NotFound:
+            return
+        except APIError as exc:
+            raise DockerRuntimeError(
+                f"Failed to remove Docker network '{network_id}'."
+            ) from exc
+
+    def create_machine(
+        self,
+        *,
+        name: str,
+        image: str,
+        network_attachments: Sequence[RuntimeNetworkAttachment],
+    ) -> RuntimeMachine:
+        try:
+            container = self.client.containers.create(
+                image=image,
+                name=name,
+                detach=True,
+            )
+
+            for attachment in network_attachments:
+                network = self.client.networks.get(
+                    attachment.network_id
+                )
+
+                connect_kwargs = {}
+
+                if attachment.ipv4_address is not None:
+                    connect_kwargs["ipv4_address"] = (
+                        attachment.ipv4_address
+                    )
+
+                network.connect(
+                    container,
+                    **connect_kwargs,
+                )
+
+        except (APIError, NotFound) as exc:
+            raise DockerRuntimeError(
+                f"Failed to create Docker machine '{name}'."
+            ) from exc
+
+        return RuntimeMachine(
+            id=container.id,
+            name=container.name,
+        )
+
+    def start_machine(self, *, machine_id: str) -> None:
+        try:
+            container = self.client.containers.get(machine_id)
+            container.start()
+        except (APIError, NotFound) as exc:
+            raise DockerRuntimeError(
+                f"Failed to start Docker machine '{machine_id}'."
+            ) from exc
+
+    def stop_machine(self, *, machine_id: str) -> None:
+        try:
+            container = self.client.containers.get(machine_id)
+            container.stop()
+        except NotFound:
+            return
+        except APIError as exc:
+            raise DockerRuntimeError(
+                f"Failed to stop Docker machine '{machine_id}'."
+            ) from exc
+
+    def remove_machine(self, *, machine_id: str) -> None:
+        try:
+            container = self.client.containers.get(machine_id)
+            container.remove(force=True)
+        except NotFound:
+            return
+        except APIError as exc:
+            raise DockerRuntimeError(
+                f"Failed to remove Docker machine '{machine_id}'."
+            ) from exc
+
+    def inspect_machine(self, *, machine_id: str) -> dict:
+        try:
+            container = self.client.containers.get(machine_id)
+            return container.attrs
+        except (APIError, NotFound) as exc:
+            raise DockerRuntimeError(
+                f"Failed to inspect Docker machine '{machine_id}'."
+            ) from exc
+
+    def inspect_network(self, *, network_id: str) -> dict:
+        try:
+            network = self.client.networks.get(network_id)
+            return network.attrs
+        except (APIError, NotFound) as exc:
+            raise DockerRuntimeError(
+                f"Failed to inspect Docker network '{network_id}'."
+            ) from exc
+
+    def execute_command(
+        self,
+        *,
+        machine_id: str,
+        command: Sequence[str],
+        timeout: int | None = None,
+    ) -> RuntimeCommandResult:
+        if not command:
+            raise DockerRuntimeError(
+                "A command is required for runtime execution."
+            )
+
+        try:
+            container = self.client.containers.get(machine_id)
+
+            if timeout is None:
+                result = container.exec_run(
+                    list(command),
+                    stdout=True,
+                    stderr=True,
+                )
+            else:
+                # Docker's exec API does not provide a portable per-command
+                # timeout through exec_run itself. The timeout is therefore
+                # handled by the caller/runtime boundary rather than passed
+                # as an unsupported Docker SDK argument.
+                result = container.exec_run(
+                    list(command),
+                    stdout=True,
+                    stderr=True,
+                )
+
+        except (APIError, NotFound) as exc:
+            raise DockerRuntimeError(
+                f"Failed to execute command on Docker machine "
+                f"'{machine_id}'."
+            ) from exc
+
+        output = result.output
+
+        if isinstance(output, tuple):
+            stdout = output[0] or b""
+            stderr = output[1] or b""
+        else:
+            stdout = output or b""
+            stderr = b""
+
+        if isinstance(stdout, bytes):
+            stdout = stdout.decode("utf-8", errors="replace")
+
+        if isinstance(stderr, bytes):
+            stderr = stderr.decode("utf-8", errors="replace")
+
+        return RuntimeCommandResult(
+            exit_code=int(result.exit_code),
+            stdout=stdout,
+            stderr=stderr,
+        )
+
+=================== app/domains/sandbox/services/environment_service.py
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from uuid import UUID
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.sandbox import (
+    Environment,
+    EnvironmentMachine,
+    EnvironmentNetwork,
+    EnvironmentState,
+    MachineInterface,
+    MachineRole,
+)
+
+from ..repositories.environment_repository import EnvironmentRepository
+from ..runtime.provider import (
+    RuntimeNetworkAttachment,
+    RuntimeProvider,
+)
+from ..validators.environment import (
+    EnvironmentValidationResult,
+    validate_environment,
+)
+
+from app.core.errors import (
+    AuthorizationError,
+    ConflictError,
+    NotFoundError,
+    ValidationError,
+)
+
+
+class SandboxServiceError(Exception):
+    """Base error for Sandbox service operations."""
+
+
+class EnvironmentNotFoundError(
+    SandboxServiceError,
+    NotFoundError,
+):
+    """Requested Sandbox environment does not exist."""
+
+
+class InvalidEnvironmentTransitionError(
+    SandboxServiceError,
+    ConflictError,
+):
+    """Sandbox environment cannot perform the requested state transition."""
+
+
+class EnvironmentOwnershipError(
+    SandboxServiceError,
+    AuthorizationError,
+):
+    """The current learner does not own the Sandbox environment."""
+
+
+class EnvironmentProvisioningError(
+    SandboxServiceError,
+    ValidationError,
+):
+    """Sandbox environment provisioning failed or was invalid."""
+
+
+@dataclass(frozen=True)
+class InterfaceSpec:
+    name: str
+    network_name: str
+    address: str
+
+
+@dataclass(frozen=True)
+class NetworkSpec:
+    name: str
+    subnet: str
+    gateway: str
+
+
+@dataclass(frozen=True)
+class MachineSpec:
+    name: str
+    role: MachineRole
+    image: str
+    interfaces: tuple[InterfaceSpec, ...] = field(default_factory=tuple)
+
+
+class EnvironmentService:
+    """Application service for Sandbox environment lifecycle and provisioning."""
+
+    _ALLOWED_TRANSITIONS: dict[EnvironmentState, set[EnvironmentState]] = {
+        EnvironmentState.REQUESTED: {
+            EnvironmentState.PROVISIONING,
+            EnvironmentState.TERMINATING,
+        },
+        EnvironmentState.PROVISIONING: {
+            EnvironmentState.READY,
+            EnvironmentState.FAILED,
+            EnvironmentState.TERMINATING,
+        },
+        EnvironmentState.READY: {
+            EnvironmentState.ACTIVE,
+            EnvironmentState.RESETTING,
+            EnvironmentState.STOPPED,
+            EnvironmentState.TERMINATING,
+        },
+        EnvironmentState.ACTIVE: {
+            EnvironmentState.RESETTING,
+            EnvironmentState.STOPPED,
+            EnvironmentState.TERMINATING,
+        },
+        EnvironmentState.RESETTING: {
+            EnvironmentState.READY,
+            EnvironmentState.FAILED,
+            EnvironmentState.TERMINATING,
+        },
+        EnvironmentState.STOPPED: {
+            EnvironmentState.READY,
+            EnvironmentState.PROVISIONING,
+            EnvironmentState.TERMINATING,
+        },
+        EnvironmentState.FAILED: {
+            EnvironmentState.PROVISIONING,
+            EnvironmentState.TERMINATING,
+        },
+        EnvironmentState.TERMINATING: {
+            EnvironmentState.DESTROYED,
+            EnvironmentState.FAILED,
+        },
+        EnvironmentState.DESTROYED: set(),
+    }
+
+    def __init__(
+        self,
+        session: AsyncSession,
+        runtime: RuntimeProvider | None = None,
+    ) -> None:
+        self.session = session
+        self.repository = EnvironmentRepository(session)
+        self.runtime = runtime
+
+    async def create_environment(
+        self,
+        *,
+        learner_id: UUID,
+        activity_id: str,
+    ) -> Environment:
+        environment = Environment(
+            learner_id=learner_id,
+            activity_id=activity_id,
+            state=EnvironmentState.REQUESTED,
+            state_version=1,
+        )
+
+        created = await self.repository.create(environment)
+        await self.repository.commit()
+        return created
+
+    async def get_environment(
+        self,
+        *,
+        environment_id: UUID,
+        learner_id: UUID,
+    ) -> Environment:
+        environment = await self.repository.get_for_learner(
+            environment_id=environment_id,
+            learner_id=learner_id,
+        )
+
+        if environment is None:
+            raise EnvironmentNotFoundError(
+                "Environment was not found for the authenticated learner."
+            )
+
+        return environment
+
+    async def validate_environment(
+        self,
+        *,
+        environment_id: UUID,
+        learner_id: UUID,
+    ) -> EnvironmentValidationResult:
+        if self.runtime is None:
+            raise EnvironmentProvisioningError(
+                "A runtime provider is required to validate an environment."
+            )
+
+        environment = await self.get_environment(
+            environment_id=environment_id,
+            learner_id=learner_id,
+        )
+
+        return validate_environment(
+            environment=environment,
+            runtime=self.runtime,
+        )
+
+    async def transition(
+        self,
+        *,
+        environment_id: UUID,
+        learner_id: UUID,
+        target_state: EnvironmentState,
+    ) -> Environment:
+        environment = await self.get_environment(
+            environment_id=environment_id,
+            learner_id=learner_id,
+        )
+
+        current_state = environment.state
+
+        if target_state == current_state:
+            return environment
+
+        allowed_states = self._ALLOWED_TRANSITIONS[current_state]
+
+        if target_state not in allowed_states:
+            raise InvalidEnvironmentTransitionError(
+                f"Invalid environment transition: "
+                f"{current_state.value} -> {target_state.value}."
+            )
+
+        environment.state = target_state
+        environment.state_version += 1
+
+        await self.repository.commit()
+
+        return environment
+
+    async def stop_environment(
+        self,
+        *,
+        environment_id: UUID,
+        learner_id: UUID,
+    ) -> Environment:
+        if self.runtime is None:
+            raise EnvironmentProvisioningError(
+                "A runtime provider is required to stop an environment."
+            )
+
+        environment = await self.get_environment(
+            environment_id=environment_id,
+            learner_id=learner_id,
+        )
+
+        if environment.state not in {
+            EnvironmentState.READY,
+            EnvironmentState.ACTIVE,
+        }:
+            raise InvalidEnvironmentTransitionError(
+                "Only READY or ACTIVE environments can be stopped."
+            )
+
+        try:
+            for machine in environment.machines:
+                if machine.runtime_machine_id is None:
+                    continue
+
+                self.runtime.stop_machine(
+                    machine_id=machine.runtime_machine_id,
+                )
+
+        except Exception as exc:
+            raise EnvironmentProvisioningError(
+                "Failed to stop environment machines."
+            ) from exc
+
+        return await self.transition(
+            environment_id=environment_id,
+            learner_id=learner_id,
+            target_state=EnvironmentState.STOPPED,
+        )
+
+    async def start_environment(
+        self,
+        *,
+        environment_id: UUID,
+        learner_id: UUID,
+    ) -> Environment:
+        if self.runtime is None:
+            raise EnvironmentProvisioningError(
+                "A runtime provider is required to start an environment."
+            )
+
+        environment = await self.get_environment(
+            environment_id=environment_id,
+            learner_id=learner_id,
+        )
+
+        if environment.state != EnvironmentState.STOPPED:
+            raise InvalidEnvironmentTransitionError(
+                "Only STOPPED environments can be started."
+            )
+
+        try:
+            for machine in environment.machines:
+                if machine.runtime_machine_id is None:
+                    continue
+
+                self.runtime.start_machine(
+                    machine_id=machine.runtime_machine_id,
+                )
+
+        except Exception as exc:
+            raise EnvironmentProvisioningError(
+                "Failed to start environment machines."
+            ) from exc
+
+        return await self.transition(
+            environment_id=environment_id,
+            learner_id=learner_id,
+            target_state=EnvironmentState.READY,
+        )
+
+    async def reset_environment(
+        self,
+        *,
+        environment_id: UUID,
+        learner_id: UUID,
+    ) -> Environment:
+        if self.runtime is None:
+            raise EnvironmentProvisioningError(
+                "A runtime provider is required to reset an environment."
+            )
+
+        environment = await self.get_environment(
+            environment_id=environment_id,
+            learner_id=learner_id,
+        )
+
+        if environment.state not in {
+            EnvironmentState.READY,
+            EnvironmentState.ACTIVE,
+        }:
+            raise InvalidEnvironmentTransitionError(
+                "Only READY or ACTIVE environments can be reset."
+            )
+
+        await self.transition(
+            environment_id=environment_id,
+            learner_id=learner_id,
+            target_state=EnvironmentState.RESETTING,
+        )
+
+        old_machine_ids = [
+            machine.runtime_machine_id
+            for machine in environment.machines
+            if machine.runtime_machine_id is not None
+        ]
+
+        old_network_ids = [
+            network.runtime_network_id
+            for network in environment.networks
+            if network.runtime_network_id is not None
+        ]
+
+        try:
+            # Remove the current runtime machines first so their network
+            # attachments no longer prevent network removal.
+            for machine_id in reversed(old_machine_ids):
+                self.runtime.stop_machine(machine_id=machine_id)
+                self.runtime.remove_machine(machine_id=machine_id)
+
+            for network_id in reversed(old_network_ids):
+                self.runtime.remove_network(network_id=network_id)
+
+            # Recreate the networks from the persisted environment topology.
+            runtime_network_ids: dict[UUID, str] = {}
+
+            for network in environment.networks:
+                runtime_network = self.runtime.create_network(
+                    name=(
+                        f"nb-env-{environment_id}-"
+                        f"net-{network.name}"
+                    ),
+                    subnet=network.subnet,
+                    gateway=network.gateway,
+                )
+
+                runtime_network_ids[network.id] = runtime_network.id
+                network.runtime_network_id = runtime_network.id
+
+            # Recreate every machine using its persisted image and interface
+            # configuration.
+            for machine in environment.machines:
+                attachments = tuple(
+                    RuntimeNetworkAttachment(
+                        network_id=runtime_network_ids[interface.network_id],
+                        ipv4_address=interface.address,
+                    )
+                    for interface in machine.interfaces
+                )
+
+                runtime_machine = self.runtime.create_machine(
+                    name=(
+                        f"nb-env-{environment_id}-"
+                        f"machine-{machine.name}"
+                    ),
+                    image=machine.image,
+                    network_attachments=attachments,
+                )
+
+                machine.runtime_machine_id = runtime_machine.id
+
+                self.runtime.start_machine(
+                    machine_id=runtime_machine.id,
+                )
+
+            await self.repository.commit()
+
+            return await self.transition(
+                environment_id=environment_id,
+                learner_id=learner_id,
+                target_state=EnvironmentState.READY,
+            )
+
+        except Exception as exc:
+            await self.repository.rollback()
+
+            try:
+                await self.transition(
+                    environment_id=environment_id,
+                    learner_id=learner_id,
+                    target_state=EnvironmentState.FAILED,
+                )
+            except Exception:
+                pass
+
+            if isinstance(exc, SandboxServiceError):
+                raise
+
+            raise EnvironmentProvisioningError(
+                "Environment reset failed."
+            ) from exc
+
+    async def terminate_environment(
+        self,
+        *,
+        environment_id: UUID,
+        learner_id: UUID,
+    ) -> Environment:
+        if self.runtime is None:
+            raise EnvironmentProvisioningError(
+                "A runtime provider is required to terminate an environment."
+            )
+
+        environment = await self.get_environment(
+            environment_id=environment_id,
+            learner_id=learner_id,
+        )
+
+        if environment.state not in {
+            EnvironmentState.REQUESTED,
+            EnvironmentState.PROVISIONING,
+            EnvironmentState.READY,
+            EnvironmentState.ACTIVE,
+            EnvironmentState.RESETTING,
+            EnvironmentState.STOPPED,
+            EnvironmentState.FAILED,
+        }:
+            raise InvalidEnvironmentTransitionError(
+                "This environment cannot be terminated from its current state."
+            )
+
+        await self.transition(
+            environment_id=environment_id,
+            learner_id=learner_id,
+            target_state=EnvironmentState.TERMINATING,
+        )
+
+        errors: list[Exception] = []
+
+        # Remove machines first so their network attachments are gone
+        # before the runtime networks are removed.
+        for machine in reversed(environment.machines):
+            runtime_machine_id = machine.runtime_machine_id
+
+            if runtime_machine_id is None:
+                continue
+
+            try:
+                try:
+   
+=================== app/domains/sandbox/services/lifecycle.py
+(missing)
+
+=================== app/domains/sandbox/services/provisioning.py
+(missing)
+
+=================== app/domains/sandbox/repositories/environment_repository.py
+from __future__ import annotations
+
+from uuid import UUID
+
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.sandbox import (
+    Environment,
+    EnvironmentMachine,
+    EnvironmentNetwork,
+    MachineInterface,
+)
+
+
+class EnvironmentRepository:
+    """Persistence operations for Sandbox environments."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def get_by_id(
+        self,
+        environment_id: UUID,
+    ) -> Environment | None:
+        result = await self.session.execute(
+            select(Environment).where(
+                Environment.id == environment_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def get_for_learner(
+        self,
+        *,
+        environment_id: UUID,
+        learner_id: UUID,
+    ) -> Environment | None:
+        result = await self.session.execute(
+            select(Environment)
+            .execution_options(populate_existing=True)
+            .options(
+                selectinload(Environment.networks),
+                selectinload(Environment.machines).selectinload(
+                    EnvironmentMachine.interfaces
+                ),
+            )
+            .where(
+                Environment.id == environment_id,
+                Environment.learner_id == learner_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def create(
+        self,
+        environment: Environment,
+    ) -> Environment:
+        self.session.add(environment)
+        await self.session.flush()
+        await self.session.refresh(environment)
+        return environment
+
+    async def add_network(
+        self,
+        network: EnvironmentNetwork,
+    ) -> EnvironmentNetwork:
+        self.session.add(network)
+        await self.session.flush()
+        await self.session.refresh(network)
+        return network
+
+    async def get_network_by_name(
+        self,
+        *,
+        environment_id: UUID,
+        name: str,
+    ) -> EnvironmentNetwork | None:
+        result = await self.session.execute(
+            select(EnvironmentNetwork).where(
+                EnvironmentNetwork.environment_id == environment_id,
+                EnvironmentNetwork.name == name,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def add_machine(
+        self,
+        machine: EnvironmentMachine,
+    ) -> EnvironmentMachine:
+        self.session.add(machine)
+        await self.session.flush()
+        await self.session.refresh(machine)
+        return machine
+
+    async def add_interface(
+        self,
+        interface: MachineInterface,
+    ) -> MachineInterface:
+        self.session.add(interface)
+        await self.session.flush()
+        await self.session.refresh(interface)
+        return interface
+
+    async def commit(self) -> None:
+        await self.session.commit()
+
+    async def rollback(self) -> None:
+        await self.session.rollback()
+
+=================== app/models/environment.py
+(missing)
+
+=================== app/models/practice_activity.py
+from enum import Enum
+from typing import Optional
+from uuid import UUID
+
+from sqlalchemy import Boolean, Enum as SAEnum, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.db.base import Base
+from app.models.base import TimestampMixin, UUIDPrimaryKeyMixin
+
+
+class PracticeActivityType(str, Enum):
+    TEXT_QUESTION = "TEXT_QUESTION"
+    PRACTICAL_TASK = "PRACTICAL_TASK"
+    GUIDED_CTF = "GUIDED_CTF"
+
+
+class PracticeEvaluationType(str, Enum):
+    MULTIPLE_CHOICE = "MULTIPLE_CHOICE"
+    TEXT_EXACT = "TEXT_EXACT"
+    TEXT_NORMALIZED = "TEXT_NORMALIZED"
+    TEXT_CASE_INSENSITIVE = "TEXT_CASE_INSENSITIVE"
+    COMMAND_RESULT = "COMMAND_RESULT"
+    OUTPUT_EXTRACTION = "OUTPUT_EXTRACTION"
+    FLAG_SUBMISSION = "FLAG_SUBMISSION"
+
+
+class PracticeActivity(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "practice_activities"
+
+    practice_id: Mapped[UUID] = mapped_column(
+        ForeignKey("practices.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    position: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    activity_type: Mapped[PracticeActivityType] = mapped_column(
+        SAEnum(
+            PracticeActivityType,
+            name="practice_activity_type",
+        ),
+        nullable=False,
+    )
+
+    title: Mapped[str] = mapped_column(
+        String(200),
+        nullable=False,
+    )
+
+    instructions: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
+
+    required: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+    )
+
+    evaluation_type: Mapped[PracticeEvaluationType] = mapped_column(
+        SAEnum(
+            PracticeEvaluationType,
+            name="practice_evaluation_type",
+        ),
+        nullable=False,
+    )
+
+    environment_requirement_id: Mapped[Optional[UUID]] = mapped_column(
+        nullable=True,
+    )
+
+    configuration: Mapped[dict] = mapped_column(
+        JSON,
+        nullable=False,
+    )
+
+    guidance_policy: Mapped[dict] = mapped_column(
+        JSON,
+        nullable=False,
+    )
+
+    __table_args__ = (
+        # One activity can occupy only one position within a practice.
+        # The authoritative source specifies UNIQUE(practice_id, position).
+        UniqueConstraint(
+            "practice_id",
+            "position",
+            name="uq_practice_activities_practice_position",
+        ),
+    )
+
+    practice = relationship(
+        "Practice",
+        back_populates="activities",
+    )
+
+=================== app/config.py
+from functools import lru_cache
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    app_name: str = "NightBreach"
+    app_version: str = "0.1.0"
+    environment: str = "development"
+    debug: bool = True
+
+    api_prefix: str = "/api/v1"
+
+    database_url: str = (
+        "postgresql+asyncpg://nightbreach:nightbreach@localhost:5432/nightbreach"
+    )
+
+    jwt_secret_key: str = "development-only-change-me-use-a-longer-key"
+    jwt_algorithm: str = "HS256"
+    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
+
+=================== websocket + workers + validators
+--- app/domains/sandbox/validators/environment.py
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+from app.models.sandbox import Environment
+
+from ..runtime.provider import RuntimeProvider
+
+
+@dataclass
+class EnvironmentValidationResult:
+    valid: bool
+    errors: list[str] = field(default_factory=list)
+
+
+def validate_environment(
+    *,
+    environment: Environment,
+    runtime: RuntimeProvider,
+) -> EnvironmentValidationResult:
+    errors: list[str] = []
+
+    networks_by_id = {
+        network.id: network
+        for network in environment.networks
+    }
+
+    runtime_network_ids: set[str] = set()
+
+    if not environment.networks:
+        errors.append("Environment has no networks.")
+
+    for network in environment.networks:
+        runtime_network_id = network.runtime_network_id
+
+        if runtime_network_id is None:
+            errors.append(
+                f"Network '{network.name}' has no runtime network."
+            )
+            continue
+
+        try:
+            inspected = runtime.inspect_network(
+                network_id=runtime_network_id,
+            )
+        except Exception:
+            errors.append(
+                f"Runtime network for '{network.name}' "
+                "could not be inspected."
+            )
+            continue
+
+        runtime_network_ids.add(runtime_network_id)
+
+        if inspected.get("Id") != runtime_network_id:
+            errors.append(
+                f"Runtime network ID mismatch for '{network.name}'."
+            )
+
+    if not environment.machines:
+        errors.append("Environment has no machines.")
+
+    for machine in environment.machines:
+        runtime_machine_id = machine.runtime_machine_id
+
+        if runtime_machine_id is None:
+            errors.append(
+                f"Machine '{machine.name}' has no runtime machine."
+            )
+            continue
+
+        try:
+            inspected = runtime.inspect_machine(
+                machine_id=runtime_machine_id,
+            )
+        except Exception:
+            errors.append(
+                f"Runtime machine for '{machine.name}' "
+                "could not be inspected."
+            )
+            continue
+
+        if inspected.get("Id") != runtime_machine_id:
+            errors.append(
+                f"Runtime machine ID mismatch for '{machine.name}'."
+            )
+
+        state = inspected.get("State") or {}
+        running = state.get("Running")
+
+        if running is None:
+            running = inspected.get("Running", False)
+
+        if not running:
+            errors.append(
+                f"Machine '{machine.name}' is not running."
+            )
+
+        if not machine.interfaces:
+            errors.append(
+                f"Machine '{machine.name}' has no interfaces."
+            )
+            continue
+
+        network_settings = inspected.get("NetworkSettings") or {}
+        runtime_networks = network_settings.get("Networks") or {}
+
+        interface_network_ids: set = set()
+
+        for interface in machine.interfaces:
+            if interface.network_id not in networks_by_id:
+                errors.append(
+                    f"Interface '{interface.name}' on machine "
+                    f"'{machine.name}' references an unknown network."
+                )
+                continue
+
+            if interface.network_id in interface_network_ids:
+                errors.append(
+                    f"Machine '{machine.name}' has multiple interfaces "
+                    "on the same network."
+                )
+
+            interface_network_ids.add(interface.network_id)
+
+            network = networks_by_id[interface.network_id]
+            runtime_network_id = network.runtime_network_id
+
+            if runtime_network_id is None:
+                errors.append(
+                    f"Interface '{interface.name}' on machine "
+                    f"'{machine.name}' references a network without "
+                    "a runtime network."
+                )
+                continue
+
+            if runtime_network_id not in runtime_network_ids:
+                errors.append(
+                    f"Interface '{interface.name}' on machine "
+                    f"'{machine.name}' references an unavailable "
+                    "runtime network."
+                )
+                continue
+
+            if not interface.address:
+                errors.append(
+                    f"Interface '{interface.name}' on machine "
+                    f"'{machine.name}' has no address."
+                )
+                continue
+
+            runtime_attachment = None
+
+            for attachment_name, attachment in runtime_networks.items():
+                if attachment_name == network.name:
+                    runtime_attachment = attachment
+                    break
+
+                if attachment.get("NetworkID") == runtime_network_id:
+                    runtime_attachment = attachment
+                    break
+
+            if runtime_attachment is None:
+                errors.append(
+                    f"Interface '{interfac--- app/domains/sandbox/validators/__init__.py
