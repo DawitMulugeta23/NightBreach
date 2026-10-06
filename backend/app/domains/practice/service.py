@@ -9,6 +9,7 @@ from app.core.errors import NotFoundError, ValidationError
 from app.domains.ctf.repository import CTFRepository
 from app.domains.ctf.service import CTFService
 from app.domains.progress.service import ProgressService
+from app.domains.sandbox.labs.ctf_binding import LabChallengeResolver
 from app.models.practice_activity import (
     PracticeActivity,
     PracticeActivityType,
@@ -28,6 +29,7 @@ class PracticeService:
         self.repository = PracticeRepository(session)
         self.ctf_service = CTFService(
             CTFRepository(session),
+            lab_resolver=LabChallengeResolver(session),
         )
         self.evaluator = evaluator or PracticeEvaluator()
 

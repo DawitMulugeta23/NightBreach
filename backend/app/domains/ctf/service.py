@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Protocol
 from uuid import UUID, uuid4
 
 from app.core.errors import NotFoundError
-from app.domains.ctf.evaluator import evaluate_submission
+from app.domains.ctf.evaluator import (
+    CTFEvaluationConfigurationError,
+    evaluate_submission,
+)
 from app.domains.ctf.repository import CTFRepository
 from app.domains.ctf.state_machine import validate_attempt_transition
 from app.models.ctf_attempt import CTFAttempt, CTFAttemptStatus
@@ -15,9 +19,46 @@ class CTFAttemptNotActiveError(Exception):
     pass
 
 
+class LabChallengeResolverProtocol(Protocol):
+    """Resolves lab-backed challenges. Implemented by the sandbox domain."""
+
+    async def check_attempt_start(
+        self,
+        *,
+        learner_id: UUID,
+        environment_id: UUID | None,
+        lab_reference: dict,
+    ) -> None: ...
+
+    async def expected_flag(
+        self,
+        *,
+        learner_id: UUID,
+        environment_id: UUID | None,
+        lab_reference: dict,
+    ) -> str: ...
+
+
 class CTFService:
-    def __init__(self, repository: CTFRepository) -> None:
+    def __init__(
+        self,
+        repository: CTFRepository,
+        lab_resolver: LabChallengeResolverProtocol | None = None,
+    ) -> None:
         self.repository = repository
+        self.lab_resolver = lab_resolver
+
+    @staticmethod
+    def _lab_reference(challenge) -> dict | None:
+        reference = (challenge.validation_config or {}).get("lab")
+        return reference if isinstance(reference, dict) else None
+
+    def _require_lab_resolver(self) -> LabChallengeResolverProtocol:
+        if self.lab_resolver is None:
+            raise CTFEvaluationConfigurationError(
+                "Lab-backed challenge cannot be handled without a lab resolver."
+            )
+        return self.lab_resolver
 
     async def list_challenges(
         self,
@@ -70,6 +111,15 @@ class CTFService:
 
         if challenge is None:
             raise NotFoundError("CTF challenge not found")
+
+        lab_reference = self._lab_reference(challenge)
+
+        if lab_reference is not None:
+            await self._require_lab_resolver().check_attempt_start(
+                learner_id=learner_id,
+                environment_id=environment_id,
+                lab_reference=lab_reference,
+            )
 
         attempt_number = await self.repository.get_next_attempt_number(
             challenge_id=challenge_id,
@@ -173,6 +223,19 @@ class CTFService:
         if challenge is None:
             raise NotFoundError("CTF challenge not found")
 
+        # Resolve the per-environment expected value before the attempt moves
+        # through its submission states. It comes from the environment stored
+        # on the attempt, never from the request.
+        lab_reference = self._lab_reference(challenge)
+        expected_override = None
+
+        if lab_reference is not None:
+            expected_override = await self._require_lab_resolver().expected_flag(
+                learner_id=learner_id,
+                environment_id=attempt.environment_id,
+                lab_reference=lab_reference,
+            )
+
         now = datetime.now(timezone.utc)
 
         validate_attempt_transition(
@@ -197,6 +260,7 @@ class CTFService:
         evaluation = evaluate_submission(
             challenge=challenge,
             submission=submission_value,
+            expected=expected_override,
         )
 
         submission = CTFSubmission(

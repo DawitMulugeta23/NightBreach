@@ -102,6 +102,7 @@ def evaluate_submission(
     *,
     challenge: CTFChallenge,
     submission: str,
+    expected: str | None = None,
 ) -> CTFEvaluationResult:
     """
     Evaluate exclusively against server-side challenge configuration.
@@ -111,7 +112,11 @@ def evaluate_submission(
     """
     config = challenge.validation_config or {}
 
-    expected = _expected_value(challenge)
+    # A caller may supply the expected value (for example a per-environment
+    # lab flag); otherwise it comes from the stored challenge configuration.
+    if expected is None:
+        expected = _expected_value(challenge)
+
     comparison = _comparison_from_config(config)
 
     passed = compare_values(

@@ -26,6 +26,7 @@ from app.domains.ctf.service import (
     CTFService,
 )
 from app.domains.ctf.state_machine import InvalidCTFAttemptTransition
+from app.domains.sandbox.labs.ctf_binding import LabChallengeResolver
 from app.models.user import User
 
 
@@ -40,6 +41,7 @@ def get_ctf_service(
 ) -> CTFService:
     return CTFService(
         repository=CTFRepository(session),
+        lab_resolver=LabChallengeResolver(session),
     )
 
 
