@@ -92,6 +92,11 @@ def summarise(answers: AnswerSet) -> dict:
             if tool not in tools_used:
                 gaps.append(f"tool:{tool}")
 
+    # NightBreach is CLI-driven: no Linux/command-line experience is a
+    # foundational gap whatever goal the learner picked.
+    if dimensions.get("linux_cli_knowledge", 0) <= 1:
+        gaps.append("linux_cli_knowledge:foundational")
+
     # Learning path recommendations (path slugs from the curriculum).
     recommended_paths: list[str] = []
     if dimensions.get("linux_cli_knowledge", 0) <= 1 or "linux" in gaps:

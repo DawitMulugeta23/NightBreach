@@ -24,8 +24,7 @@ async def auth_headers(client):
     response = await client.post(
         "/api/v1/auth/register",
         json={
-            "username": username,
-            "email": f"{username}@example.test",
+            "username": username,             "email": f"{username}@example.com",
             "password": "strong-password-123",
         },
     )

@@ -16,6 +16,7 @@ from uuid import UUID
 DEFAULT_TTL_SECONDS = 30
 DEFAULT_MAX_OUTSTANDING = 1000
 DEFAULT_MAX_PER_LEARNER = 5
+DEFAULT_LEARNER_USERNAME = "learner"
 
 
 class TicketLimitError(RuntimeError):
@@ -59,6 +60,7 @@ class TerminalTicketStore:
         environment_id: UUID,
         machine_name: str,
         runtime_machine_id: str,
+        learner_username: str | None = None,
     ) -> str:
         now = self._clock()
 
@@ -76,6 +78,9 @@ class TerminalTicketStore:
             ticket_id = secrets.token_urlsafe(32)
             self._tickets[ticket_id] = TerminalTicket(
                 learner_id=learner_id,
+                # The prompt identity travels with the ticket so the
+                # WebSocket never needs the access token to build it.
+                learner_username=learner_username or DEFAULT_LEARNER_USERNAME,
                 environment_id=environment_id,
                 machine_name=machine_name,
                 runtime_machine_id=runtime_machine_id,

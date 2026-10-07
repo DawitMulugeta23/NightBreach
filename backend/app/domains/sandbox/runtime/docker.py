@@ -286,50 +286,72 @@ class DockerRuntimeProvider(RuntimeProvider):
             stderr=stderr,
         )
 
-    def open_shell(self, *, machine_id: str, username: str) -> RuntimeShell:
+    def open_shell(
+        self,
+        *,
+        machine_id: str,
+        username: str | None = None,
+        command: Sequence[str] = ("/bin/bash", "-i"),
+        environment: dict[str, str] | None = None,
+    ) -> RuntimeShell:
+        exec_environment = {"TERM": "xterm-256color"}
+
+        if environment:
+            exec_environment.update(environment)
+
         try:
-            container = self._client.containers.get(machine_id)
+            container = self.client.containers.get(machine_id)
+            argv = list(command)
 
-            bashrc_path = "/tmp/nightbreach.bashrc"
-            payload = build_bashrc(username)
+            if username is not None:
+                # Inject the NightBreach learner prompt as a per-session
+                # bashrc inside the container. The image itself is never
+                # modified and the username never enters a shell string.
+                bashrc_path = "/tmp/nightbreach.bashrc"
+                payload = build_bashrc(username)
 
-            # Write the bashrc inside the container without ever putting the
-            # username into a shell string on the host.
-            container.put_archive(
-                path="/tmp",
-                data=_tar_with_file("nightbreach.bashrc", payload.encode("utf-8")),
-            )
+                container.put_archive(
+                    path="/tmp",
+                    data=_tar_with_file(
+                        "nightbreach.bashrc",
+                        payload.encode("utf-8"),
+                    ),
+                )
 
-            exec_id = self._client.api.exec_create(
+                argv = ["/bin/bash", "--rcfile", bashrc_path, "-i"]
+
+            exec_id = self.client.api.exec_create(
                 container.id,
-                ["/bin/bash", "--rcfile", bashrc_path, "-i"],
+                argv,
                 tty=True,
                 stdin=True,
-                environment={"TERM": "xterm-256color"},
+                environment=exec_environment,
             )["Id"]
 
-            stream = self._client.api.exec_start(
+            stream = self.client.api.exec_start(
                 exec_id, tty=True, socket=True
             )
 
             return DockerShell(
-                client=self._client,
+                client=self.client,
                 exec_id=exec_id,
                 stream=stream,
             )
         except APIError as error:
             raise DockerRuntimeError("Failed to open a shell.") from error
-    def _tar_with_file(name: str, content: bytes) -> bytes:
-        """Build a minimal in-memory tar containing one file."""
-        import io
-        import tarfile
 
-        buffer = io.BytesIO()
-        with tarfile.open(fileobj=buffer, mode="w") as archive:
-            info = tarfile.TarInfo(name=name)
-            info.size = len(content)
-            archive.addfile(info, io.BytesIO(content))
-        return buffer.getvalue()
+
+def _tar_with_file(name: str, content: bytes) -> bytes:
+    """Build a minimal in-memory tar containing one file."""
+    import io
+    import tarfile
+
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w") as archive:
+        info = tarfile.TarInfo(name=name)
+        info.size = len(content)
+        archive.addfile(info, io.BytesIO(content))
+    return buffer.getvalue()
 
 
 class DockerShell(RuntimeShell):

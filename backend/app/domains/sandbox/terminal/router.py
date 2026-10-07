@@ -23,6 +23,7 @@ from app.db.session import get_db_session
 from app.models.user import User
 
 from ..dependencies import get_runtime_provider
+from ..repositories.environment_repository import EnvironmentRepository
 from ..runtime.provider import RuntimeProvider
 from .service import TerminalService
 from .tickets import ticket_store
@@ -60,8 +61,14 @@ async def create_terminal_session(
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db_session),
 ) -> TerminalSessionResponse:
-    created = await TerminalService(session).create_session(
+    created = await TerminalService(
+        store=ticket_store,
+        repository=EnvironmentRepository(session),
+    ).create_session(
         learner_id=current_user.id,
+        # The prompt identity is derived server-side from the authenticated
+        # learner; the client never supplies it.
+        learner_username=current_user.username,
         environment_id=environment_id,
         machine_name=machine_name,
     )
@@ -177,18 +184,18 @@ async def terminal_socket(
     # Count the session before the first await so concurrent connections
     # cannot slip past the limits.
     _active_sessions[ticket.learner_id] += 1
-    shell = runtime.open_shell(
-        machine_id=ticket.runtime_machine_id,
-        username=ticket.learner_username,
-    )
+    shell = None
 
     try:
         await websocket.accept()
 
         try:
+            # The shell inherits the Attack Machine's identity and network
+            # context; the ticket carries the learner prompt username.
             shell = await asyncio.to_thread(
                 runtime.open_shell,
                 machine_id=ticket.runtime_machine_id,
+                username=ticket.learner_username,
             )
         except Exception:
             await websocket.send_json(

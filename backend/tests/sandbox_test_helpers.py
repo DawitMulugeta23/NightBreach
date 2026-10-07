@@ -9,6 +9,7 @@ from app.domains.sandbox.runtime.provider import (
     RuntimeNetwork,
     RuntimeNetworkAttachment,
     RuntimeProvider,
+    RuntimeShell,
 )
 
 
@@ -48,6 +49,7 @@ class FakeRuntime(RuntimeProvider):
         self.fail_remove_network_ids: set[str] = set()
 
         self.executed_commands: list[tuple[str, list[str]]] = []
+        self.opened_shells: list[tuple[str, str | None]] = []
 
         self.command_results: dict[
             tuple[str, tuple[str, ...]],
@@ -226,3 +228,37 @@ class FakeRuntime(RuntimeProvider):
             stdout="",
             stderr="",
         )
+
+    def open_shell(
+        self,
+        *,
+        machine_id: str,
+        username: str | None = None,
+        command=None,
+        environment=None,
+    ) -> RuntimeShell:
+        if machine_id not in self.machines:
+            raise RuntimeError(f"Unknown fake machine '{machine_id}'.")
+
+        self.opened_shells.append((machine_id, username))
+        return FakeShell()
+
+
+class FakeShell(RuntimeShell):
+    """Minimal in-memory shell used by the fake runtime."""
+
+    def __init__(self) -> None:
+        self.closed = False
+        self.written: list[bytes] = []
+
+    def read(self) -> bytes | None:
+        return None
+
+    def write(self, data: bytes) -> None:
+        self.written.append(data)
+
+    def resize(self, cols: int, rows: int) -> None:
+        return None
+
+    def close(self) -> None:
+        self.closed = True

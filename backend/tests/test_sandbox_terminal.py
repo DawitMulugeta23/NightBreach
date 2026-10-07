@@ -45,7 +45,8 @@ def issue(store, **overrides):
 
 def test_terminal_opens_with_learner_username(terminal_app):
     client, runtime = terminal_app
-    with client.websocket_connect(f"/sandbox/terminal/{new_ticket()}"):
+    ticket = new_ticket(learner_username="prog_user")
+    with client.websocket_connect(f"/sandbox/terminal/{ticket}"):
         pass
     assert runtime.opened_usernames == ["prog_user"]
 def test_ticket_is_single_use():
@@ -261,11 +262,13 @@ class FakeTerminalRuntime:
         self.fail = fail
         self.shell = FakeShell()
         self.opened = []
+        self.opened_usernames = []
 
-    def open_shell(self, *, machine_id, **kwargs):
+    def open_shell(self, *, machine_id, username=None, **kwargs):
         if self.fail:
             raise RuntimeError("no such container")
         self.opened.append(machine_id)
+        self.opened_usernames.append(username)
         return self.shell
 
 

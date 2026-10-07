@@ -9,6 +9,7 @@ from app.domains.sandbox.runtime.provider import (
     RuntimeNetwork,
     RuntimeNetworkAttachment,
     RuntimeProvider,
+    RuntimeShell,
 )
 from app.domains.sandbox.services.environment_service import (
     EnvironmentProvisioningError,
@@ -101,6 +102,30 @@ class FakeRuntimeProvider(RuntimeProvider):
             stdout="",
             stderr="",
         )
+
+    def open_shell(
+        self,
+        *,
+        machine_id: str,
+        username: str | None = None,
+        command=None,
+        environment=None,
+    ) -> RuntimeShell:
+        return FakeShell()
+
+
+class FakeShell(RuntimeShell):
+    def read(self) -> bytes | None:
+        return None
+
+    def write(self, data: bytes) -> None:
+        return None
+
+    def resize(self, cols: int, rows: int) -> None:
+        return None
+
+    def close(self) -> None:
+        return None
 
 
 class FakeRepository:

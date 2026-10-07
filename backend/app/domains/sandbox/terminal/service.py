@@ -3,13 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from uuid import UUID
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.core.errors import ConflictError, NotFoundError
 from app.models.sandbox import EnvironmentState, MachineRole
 
-from ..repositories.environment_repository import EnvironmentRepository
-from .tickets import TerminalTicketStore, TicketLimitError, ticket_store
+from .tickets import TerminalTicketStore, TicketLimitError
 
 # Learners get a shell on the attack machine only. They reach the target the
 # way an attacker would: over the lab network.
@@ -37,10 +34,10 @@ class TerminalService:
         self,
         *,
         learner_id: UUID,
-        learner_username: str,
         environment_id: UUID,
         machine_name: str,
-    ):
+        learner_username: str | None = None,
+    ) -> TerminalSession:
         environment = await self._repository.get_for_learner(
             environment_id=environment_id,
             learner_id=learner_id,
@@ -65,11 +62,14 @@ class TerminalService:
             None,
         )
 
-        if machine is None or not machine.runtime_machine_id:
+        if machine is None:
             raise NotFoundError("Attack machine not found.")
 
+        if not machine.runtime_machine_id:
+            raise ConflictError("The attack machine is not available.")
+
         try:
-            ticket = self._store.issue(
+            ticket_id = self._store.issue(
                 learner_id=learner_id,
                 learner_username=learner_username,
                 environment_id=environment_id,
@@ -79,4 +79,7 @@ class TerminalService:
         except TicketLimitError as error:
             raise ConflictError(str(error)) from error
 
-        return ticket
+        return TerminalSession(
+            session_id=ticket_id,
+            expires_in=self._store.ttl_seconds,
+        )
