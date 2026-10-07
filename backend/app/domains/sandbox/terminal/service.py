@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from app.core.errors import ConflictError, NotFoundError
-from app.models.sandbox import EnvironmentState, MachineRole
+from app.models.sandbox import EnvironmentState, MachineRole, MachineState
 
 from .tickets import TerminalTicketStore, TicketLimitError
 
@@ -67,6 +67,13 @@ class TerminalService:
 
         if not machine.runtime_machine_id:
             raise ConflictError("The attack machine is not available.")
+
+        # Runtime RUNNING is not READY: the machine may only be used after
+        # the Sandbox has validated its runtime conditions.
+        if machine.state != MachineState.READY:
+            raise ConflictError(
+                "The attack machine is not ready yet. Try again shortly."
+            )
 
         try:
             ticket_id = self._store.issue(

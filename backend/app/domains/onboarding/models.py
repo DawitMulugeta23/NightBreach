@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, ForeignKey, JSON, String
+from sqlalchemy import DateTime, ForeignKey, Index, JSON, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -19,14 +19,25 @@ class LearnerProfile(Base):
 
     __tablename__ = "learner_profiles"
 
+    # Named explicitly so the metadata matches the existing database exactly.
+    __table_args__ = (
+        UniqueConstraint(
+            "learner_id",
+            name="learner_profiles_learner_id_key",
+        ),
+        Index(
+            "ix_learner_profiles_learner_id",
+            "learner_id",
+            unique=True,
+        ),
+    )
+
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     learner_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
-        unique=True,
-        index=True,
     )
 
     # Capability dimensions (SRS 4.4). All enum-ish strings.

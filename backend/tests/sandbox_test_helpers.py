@@ -9,6 +9,7 @@ from app.domains.sandbox.runtime.provider import (
     RuntimeNetwork,
     RuntimeNetworkAttachment,
     RuntimeProvider,
+    RuntimeRoute,
     RuntimeShell,
 )
 
@@ -17,6 +18,8 @@ from app.domains.sandbox.runtime.provider import (
 class FakeNetwork:
     id: str
     name: str
+    subnet: str | None = None
+    gateway: str | None = None
 
 
 @dataclass
@@ -24,9 +27,11 @@ class FakeMachine:
     id: str
     name: str
     running: bool = False
+    hostname: str | None = None
     network_attachments: list[RuntimeNetworkAttachment] = field(
         default_factory=list
     )
+    routes: list[RuntimeRoute] = field(default_factory=list)
 
 
 class FakeRuntime(RuntimeProvider):
@@ -41,12 +46,25 @@ class FakeRuntime(RuntimeProvider):
         self.created_machines: list[RuntimeMachine] = []
 
         self.machine_limits: dict[str, object | None] = {}
+        self.machine_hostnames: dict[str, str | None] = {}
         self.fail_create_machine = False
         self.fail_start_machine = False
         self.fail_execute_command = False
 
         self.fail_remove_machine_ids: set[str] = set()
         self.fail_remove_network_ids: set[str] = set()
+
+        self.started_machines: list[str] = []
+        self.stopped_machines: list[str] = []
+        self.configured_routes: list[tuple[str, RuntimeRoute]] = []
+
+        # Probe outcomes; every probe succeeds unless overridden.
+        self.probe_results: dict[tuple[str, int], bool] = {}
+        self.ping_results: dict[str, bool] = {}
+        self.fail_probe = False
+        self.fail_ping = False
+        self.probed_services: list[tuple[str, str, int, str]] = []
+        self.pinged: list[tuple[str, str]] = []
 
         self.executed_commands: list[tuple[str, list[str]]] = []
         self.opened_shells: list[tuple[str, str | None]] = []
@@ -73,6 +91,8 @@ class FakeRuntime(RuntimeProvider):
         network = FakeNetwork(
             id=network_id,
             name=name,
+            subnet=subnet,
+            gateway=gateway,
         )
 
         self.networks[network_id] = network
@@ -103,8 +123,10 @@ class FakeRuntime(RuntimeProvider):
         network_attachments: Sequence[RuntimeNetworkAttachment],
         limits: object | None = None,
         command: Sequence[str] | None = None,
+        hostname: str | None = None,
     ) -> RuntimeMachine:
         self.machine_limits[name] = limits
+        self.machine_hostnames[name] = hostname
 
         if self.fail_create_machine:
             raise RuntimeError("Fake machine creation failed.")
@@ -115,6 +137,7 @@ class FakeRuntime(RuntimeProvider):
         machine = FakeMachine(
             id=machine_id,
             name=name,
+            hostname=hostname,
             network_attachments=list(network_attachments),
         )
 
@@ -135,12 +158,14 @@ class FakeRuntime(RuntimeProvider):
 
         machine = self.machines[machine_id]
         machine.running = True
+        self.started_machines.append(machine_id)
 
     def stop_machine(self, *, machine_id: str) -> None:
         machine = self.machines.get(machine_id)
 
         if machine is not None:
             machine.running = False
+            self.stopped_machines.append(machine_id)
 
     def remove_machine(self, *, machine_id: str) -> None:
         if machine_id in self.fail_remove_machine_ids:
@@ -186,6 +211,70 @@ class FakeRuntime(RuntimeProvider):
             "Id": network.id,
             "Name": network.name,
         }
+
+    def configure_route(
+        self,
+        *,
+        machine_id: str,
+        destination: str,
+        gateway: str | None = None,
+        interface: str | None = None,
+    ) -> None:
+        machine = self.machines.get(machine_id)
+
+        if machine is None:
+            raise RuntimeError(f"Unknown fake machine '{machine_id}'.")
+
+        route = RuntimeRoute(
+            destination=destination,
+            gateway=gateway,
+            interface=interface,
+        )
+
+        machine.routes = [
+            existing
+            for existing in machine.routes
+            if existing.destination != destination
+        ]
+        machine.routes.append(route)
+        self.configured_routes.append((machine_id, route))
+
+    def inspect_routes(self, *, machine_id: str) -> tuple[RuntimeRoute, ...]:
+        machine = self.machines.get(machine_id)
+
+        if machine is None:
+            raise RuntimeError(f"Unknown fake machine '{machine_id}'.")
+
+        return tuple(machine.routes)
+
+    def probe_service(
+        self,
+        *,
+        machine_id: str,
+        host: str,
+        port: int,
+        protocol: str = "tcp",
+    ) -> bool:
+        if machine_id not in self.machines:
+            raise RuntimeError(f"Unknown fake machine '{machine_id}'.")
+
+        self.probed_services.append((machine_id, host, port, protocol))
+
+        if self.fail_probe:
+            return False
+
+        return self.probe_results.get((host, port), True)
+
+    def ping(self, *, machine_id: str, host: str) -> bool:
+        if machine_id not in self.machines:
+            raise RuntimeError(f"Unknown fake machine '{machine_id}'.")
+
+        self.pinged.append((machine_id, host))
+
+        if self.fail_ping:
+            return False
+
+        return self.ping_results.get(host, True)
 
     def execute_command(
         self,

@@ -36,6 +36,15 @@ class RuntimeNetworkAttachment:
 
 
 @dataclass(frozen=True)
+class RuntimeRoute:
+    """A route configured (or observed) inside a runtime machine."""
+
+    destination: str
+    gateway: str | None = None
+    interface: str | None = None
+
+
+@dataclass(frozen=True)
 class RuntimeCommandResult:
     exit_code: int
     stdout: str
@@ -104,7 +113,42 @@ class RuntimeProvider(ABC):
         network_attachments: Sequence[RuntimeNetworkAttachment],
         limits: RuntimeMachineLimits | None = None,
         command: Sequence[str] | None = None,
+        hostname: str | None = None,
     ) -> RuntimeMachine:
+        raise NotImplementedError
+
+    @abstractmethod
+    def configure_route(
+        self,
+        *,
+        machine_id: str,
+        destination: str,
+        gateway: str | None = None,
+        interface: str | None = None,
+    ) -> None:
+        """Add or replace a route inside a running machine."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def inspect_routes(self, *, machine_id: str) -> tuple[RuntimeRoute, ...]:
+        """Return the routes currently configured inside a machine."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def probe_service(
+        self,
+        *,
+        machine_id: str,
+        host: str,
+        port: int,
+        protocol: str = "tcp",
+    ) -> bool:
+        """Probe host:port from inside machine_id. True when reachable."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def ping(self, *, machine_id: str, host: str) -> bool:
+        """ICMP probe of host from inside machine_id."""
         raise NotImplementedError
 
     @abstractmethod
@@ -142,6 +186,7 @@ class RuntimeProvider(ABC):
         self,
         *,
         machine_id: str,
+        username: str | None = None,
         command: Sequence[str] = ("/bin/bash", "-i"),
         environment: dict[str, str] | None = None,
     ) -> RuntimeShell:

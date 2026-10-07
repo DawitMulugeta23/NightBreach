@@ -12,6 +12,9 @@ from sqlalchemy import engine_from_config, pool
 from app.config import get_settings
 from app.db.base import Base
 import app.models
+# Domain-local models (outside app.models) must also be registered on the
+# metadata alembic compares against.
+import app.domains.onboarding.models  # noqa: F401
 
 config = context.config
 

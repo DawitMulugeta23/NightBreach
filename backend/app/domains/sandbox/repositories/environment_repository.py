@@ -12,6 +12,8 @@ from app.models.sandbox import (
     EnvironmentNetwork,
     EnvironmentState,
     MachineInterface,
+    MachineRoute,
+    MachineService,
 )
 
 
@@ -45,6 +47,12 @@ class EnvironmentRepository:
                 selectinload(Environment.networks),
                 selectinload(Environment.machines).selectinload(
                     EnvironmentMachine.interfaces
+                ),
+                selectinload(Environment.machines).selectinload(
+                    EnvironmentMachine.routes
+                ),
+                selectinload(Environment.machines).selectinload(
+                    EnvironmentMachine.services
                 ),
             )
             .where(
@@ -103,6 +111,24 @@ class EnvironmentRepository:
         await self.session.flush()
         await self.session.refresh(interface)
         return interface
+
+    async def add_route(
+        self,
+        route: MachineRoute,
+    ) -> MachineRoute:
+        self.session.add(route)
+        await self.session.flush()
+        await self.session.refresh(route)
+        return route
+
+    async def add_service(
+        self,
+        service: MachineService,
+    ) -> MachineService:
+        self.session.add(service)
+        await self.session.flush()
+        await self.session.refresh(service)
+        return service
 
     async def list_live_lab_environments(
         self,

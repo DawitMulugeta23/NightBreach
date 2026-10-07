@@ -6,7 +6,7 @@ import pytest
 from app.core.errors import ConflictError
 from app.domains.sandbox.terminal.service import TerminalService
 from app.domains.sandbox.terminal.tickets import TerminalTicketStore, TicketLimitError
-from app.models.sandbox import EnvironmentState, MachineRole
+from app.models.sandbox import EnvironmentState, MachineRole, MachineState
 
 
 def issue(store, learner):
@@ -73,7 +73,12 @@ async def test_service_reports_the_ticket_limit_as_a_conflict():
         id=uuid4(),
         state=EnvironmentState.READY,
         machines=[
-            SimpleNamespace(name="attacker", role=MachineRole.ATTACK, runtime_machine_id="rt-1")
+            SimpleNamespace(
+                name="attacker",
+                role=MachineRole.ATTACK,
+                runtime_machine_id="rt-1",
+                state=MachineState.READY,
+            )
         ],
     )
     service = TerminalService(

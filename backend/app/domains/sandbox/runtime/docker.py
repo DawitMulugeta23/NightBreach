@@ -1,5 +1,6 @@
 from __future__ import annotations
 from .prompt import build_bashrc
+import re
 import socket
 from typing import Sequence
 
@@ -13,10 +14,17 @@ from .provider import (
     RuntimeNetwork,
     RuntimeNetworkAttachment,
     RuntimeProvider,
+    RuntimeRoute,
     RuntimeShell,
 )
 
 MANAGED_LABELS = {"nightbreach.managed": "true"}
+
+# Hosts, ports and destinations are interpolated into shell commands executed
+# inside containers, so they are strictly validated before use.
+_HOST_PATTERN = re.compile(r"^[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?$")
+_CIDR_PATTERN = re.compile(r"^[0-9]{1,3}(\.[0-9]{1,3}){3}(/[0-9]{1,2})?$")
+_INTERFACE_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,15}$")
 
 
 class DockerRuntimeError(RuntimeError):
@@ -88,6 +96,7 @@ class DockerRuntimeProvider(RuntimeProvider):
         network_attachments: Sequence[RuntimeNetworkAttachment],
         limits: RuntimeMachineLimits | None = None,
         command: Sequence[str] | None = None,
+        hostname: str | None = None,
     ) -> RuntimeMachine:
         if not network_attachments:
             raise DockerRuntimeError(
@@ -147,6 +156,7 @@ class DockerRuntimeProvider(RuntimeProvider):
                 image=image,
                 command=list(command) if command else None,
                 name=name,
+                hostname=hostname or name,
                 user=limits.user,
                 labels=dict(MANAGED_LABELS),
                 host_config=host_config,
@@ -195,6 +205,231 @@ class DockerRuntimeProvider(RuntimeProvider):
             raise DockerRuntimeError(
                 f"Failed to start Docker machine '{machine_id}'."
             ) from exc
+
+    def configure_route(
+        self,
+        *,
+        machine_id: str,
+        destination: str,
+        gateway: str | None = None,
+        interface: str | None = None,
+    ) -> None:
+        if not _CIDR_PATTERN.fullmatch(destination):
+            raise DockerRuntimeError(
+                f"Invalid route destination '{destination}'."
+            )
+
+        if gateway is not None and not _HOST_PATTERN.fullmatch(gateway):
+            raise DockerRuntimeError(f"Invalid route gateway '{gateway}'.")
+
+        if interface is not None and not _INTERFACE_PATTERN.fullmatch(
+            interface
+        ):
+            raise DockerRuntimeError(
+                f"Invalid route interface '{interface}'."
+            )
+
+        argv = ["ip", "route", "replace", destination]
+
+        if gateway is not None:
+            argv.extend(["via", gateway])
+
+        if interface is not None:
+            argv.extend(["dev", interface])
+
+        # Routes are programmed from inside the container, as root: adding a
+        # route needs CAP_NET_ADMIN, which the container's default user may
+        # not hold even when the capability is granted to the container.
+        result = self._exec_argv(machine_id, argv, user="root")
+
+        if result.exit_code != 0:
+            detail = (result.stderr or result.stdout).strip()
+            raise DockerRuntimeError(
+                f"Failed to configure route '{destination}' on Docker "
+                f"machine '{machine_id}': {detail or 'ip route failed'}"
+            )
+
+    def inspect_routes(self, *, machine_id: str) -> tuple[RuntimeRoute, ...]:
+        result = self._exec_argv(
+            machine_id,
+            ["ip", "-j", "route"],
+            user="root",
+        )
+
+        if result.exit_code == 0:
+            return self._parse_json_routes(result.stdout)
+
+        result = self._exec_argv(
+            machine_id,
+            ["ip", "route"],
+            user="root",
+        )
+
+        if result.exit_code != 0:
+            detail = (result.stderr or result.stdout).strip()
+            raise DockerRuntimeError(
+                f"Failed to inspect routes on Docker machine "
+                f"'{machine_id}': {detail or 'ip route failed'}"
+            )
+
+        return self._parse_text_routes(result.stdout)
+
+    @staticmethod
+    def _parse_json_routes(stdout: str) -> tuple[RuntimeRoute, ...]:
+        import json
+
+        try:
+            entries = json.loads(stdout)
+        except ValueError as exc:
+            raise DockerRuntimeError(
+                "Runtime returned an unreadable route table."
+            ) from exc
+
+        routes: list[RuntimeRoute] = []
+
+        if not isinstance(entries, list):
+            raise DockerRuntimeError(
+                "Runtime returned an unreadable route table."
+            )
+
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+
+            destination = entry.get("dst") or ""
+
+            if destination in ("default", ""):
+                destination = "0.0.0.0/0"
+
+            routes.append(
+                RuntimeRoute(
+                    destination=destination,
+                    gateway=entry.get("gw"),
+                    interface=entry.get("dev"),
+                )
+            )
+
+        return tuple(routes)
+
+    @staticmethod
+    def _parse_text_routes(stdout: str) -> tuple[RuntimeRoute, ...]:
+        routes: list[RuntimeRoute] = []
+
+        for line in stdout.splitlines():
+            parts = line.split()
+
+            if not parts:
+                continue
+
+            destination = parts[0]
+
+            if destination == "default":
+                destination = "0.0.0.0/0"
+
+            gateway = None
+            interface = None
+
+            if "via" in parts:
+                index = parts.index("via")
+
+                if index + 1 < len(parts):
+                    gateway = parts[index + 1]
+
+            if "dev" in parts:
+                index = parts.index("dev")
+
+                if index + 1 < len(parts):
+                    interface = parts[index + 1]
+
+            routes.append(
+                RuntimeRoute(
+                    destination=destination,
+                    gateway=gateway,
+                    interface=interface,
+                )
+            )
+
+        return tuple(routes)
+
+    def probe_service(
+        self,
+        *,
+        machine_id: str,
+        host: str,
+        port: int,
+        protocol: str = "tcp",
+    ) -> bool:
+        if not _HOST_PATTERN.fullmatch(host):
+            raise DockerRuntimeError(f"Invalid probe host '{host}'.")
+
+        if not isinstance(port, int) or not 1 <= port <= 65535:
+            raise DockerRuntimeError(f"Invalid probe port '{port}'.")
+
+        if protocol == "tcp":
+            script = f"exec 3<>/dev/tcp/{host}/{port}"
+        elif protocol == "udp":
+            # UDP has no handshake; a successful datagram send is the
+            # strongest portable readiness signal from inside a container.
+            script = f"exec 3<>/dev/udp/{host}/{port} && printf x >&3"
+        else:
+            raise DockerRuntimeError(f"Unsupported probe protocol '{protocol}'.")
+
+        result = self._exec_argv(
+            machine_id,
+            ["bash", "-c", script],
+        )
+        return result.exit_code == 0
+
+    def ping(self, *, machine_id: str, host: str) -> bool:
+        if not _HOST_PATTERN.fullmatch(host):
+            raise DockerRuntimeError(f"Invalid ping host '{host}'.")
+
+        result = self._exec_argv(
+            machine_id,
+            ["ping", "-c", "1", "-W", "3", host],
+        )
+        return result.exit_code == 0
+
+    def _exec_argv(
+        self,
+        machine_id: str,
+        argv: Sequence[str],
+        user: str | None = None,
+    ) -> RuntimeCommandResult:
+        try:
+            container = self.client.containers.get(machine_id)
+            result = container.exec_run(
+                list(argv),
+                stdout=True,
+                stderr=True,
+                user=user,
+            )
+        except (APIError, NotFound) as exc:
+            raise DockerRuntimeError(
+                f"Failed to execute command on Docker machine "
+                f"'{machine_id}'."
+            ) from exc
+
+        output = result.output
+
+        if isinstance(output, tuple):
+            stdout = output[0] or b""
+            stderr = output[1] or b""
+        else:
+            stdout = output or b""
+            stderr = b""
+
+        if isinstance(stdout, bytes):
+            stdout = stdout.decode("utf-8", errors="replace")
+
+        if isinstance(stderr, bytes):
+            stderr = stderr.decode("utf-8", errors="replace")
+
+        return RuntimeCommandResult(
+            exit_code=int(result.exit_code),
+            stdout=stdout,
+            stderr=stderr,
+        )
 
     def stop_machine(self, *, machine_id: str) -> None:
         try:
@@ -248,43 +483,9 @@ class DockerRuntimeProvider(RuntimeProvider):
                 "A command is required for runtime execution."
             )
 
-        try:
-            container = self.client.containers.get(machine_id)
-
-            # Docker's exec API has no portable per-command timeout; callers
-            # bound runtime with the command itself (e.g. ping -W).
-            result = container.exec_run(
-                list(command),
-                stdout=True,
-                stderr=True,
-            )
-
-        except (APIError, NotFound) as exc:
-            raise DockerRuntimeError(
-                f"Failed to execute command on Docker machine "
-                f"'{machine_id}'."
-            ) from exc
-
-        output = result.output
-
-        if isinstance(output, tuple):
-            stdout = output[0] or b""
-            stderr = output[1] or b""
-        else:
-            stdout = output or b""
-            stderr = b""
-
-        if isinstance(stdout, bytes):
-            stdout = stdout.decode("utf-8", errors="replace")
-
-        if isinstance(stderr, bytes):
-            stderr = stderr.decode("utf-8", errors="replace")
-
-        return RuntimeCommandResult(
-            exit_code=int(result.exit_code),
-            stdout=stdout,
-            stderr=stderr,
-        )
+        # Docker's exec API has no portable per-command timeout; callers
+        # bound runtime with the command itself (e.g. ping -W).
+        return self._exec_argv(machine_id, command)
 
     def open_shell(
         self,

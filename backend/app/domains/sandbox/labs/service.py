@@ -17,7 +17,9 @@ from ..services.environment_service import (
     MachineSpec,
     NetworkSpec,
     SandboxServiceError,
+    ServiceSpec,
 )
+from ..targets import target_service_specs
 from .flags import FLAG_FOUND, check_flag, derive_flag, plant_lab_flags
 from .registry import (
     LAB_INTERFACE_NAME,
@@ -159,6 +161,19 @@ class LabService:
                             ),
                         ),
                         limits=machine.limits,
+                        # Services come from the Target Build System's
+                        # runtime spec; the Sandbox only validates them.
+                        services=tuple(
+                            ServiceSpec(
+                                name=service.name,
+                                port=service.port,
+                                protocol=service.protocol,
+                                required=service.required,
+                            )
+                            for service in target_service_specs(
+                                machine.target_id
+                            )
+                        ),
                     )
                     for machine in lab.machines
                 ),

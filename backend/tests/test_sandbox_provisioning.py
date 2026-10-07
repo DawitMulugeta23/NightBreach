@@ -9,6 +9,7 @@ from app.domains.sandbox.runtime.provider import (
     RuntimeNetwork,
     RuntimeNetworkAttachment,
     RuntimeProvider,
+    RuntimeRoute,
     RuntimeShell,
 )
 from app.domains.sandbox.services.environment_service import (
@@ -17,6 +18,8 @@ from app.domains.sandbox.services.environment_service import (
     InterfaceSpec,
     MachineSpec,
     NetworkSpec,
+    RouteSpec,
+    ServiceSpec,
 )
 from app.models.sandbox import Environment, EnvironmentState, MachineRole
 
@@ -32,8 +35,14 @@ class FakeRuntimeProvider(RuntimeProvider):
         self.stopped_machines: list[str] = []
         self.removed_machines: list[str] = []
         self.removed_networks: list[str] = []
+        self.running_ids: set[str] = set()
+        self.routes: dict[str, list[RuntimeRoute]] = {}
+        self.hostnames: dict[str, str | None] = {}
         self.fail_on_create_machine = False
         self.fail_on_start_machine = False
+        self.fail_route_configuration = False
+        self.fail_ping = False
+        self.fail_probe = False
 
     def create_network(
         self,
@@ -60,6 +69,7 @@ class FakeRuntimeProvider(RuntimeProvider):
         network_attachments: Sequence[RuntimeNetworkAttachment],
         limits=None,
         command=None,
+        hostname: str | None = None,
     ) -> RuntimeMachine:
         if self.fail_on_create_machine:
             raise RuntimeError("machine creation failed")
@@ -70,6 +80,8 @@ class FakeRuntimeProvider(RuntimeProvider):
         )
         self.machines.append(machine)
         self.attachments.append((machine.id, tuple(network_attachments)))
+        self.hostnames[machine.id] = hostname
+        self.routes[machine.id] = []
         return machine
 
     def start_machine(self, *, machine_id: str) -> None:
@@ -77,18 +89,84 @@ class FakeRuntimeProvider(RuntimeProvider):
             raise RuntimeError("machine start failed")
 
         self.started_machines.append(machine_id)
+        self.running_ids.add(machine_id)
 
     def stop_machine(self, *, machine_id: str) -> None:
         self.stopped_machines.append(machine_id)
+        self.running_ids.discard(machine_id)
 
     def remove_machine(self, *, machine_id: str) -> None:
         self.removed_machines.append(machine_id)
+        self.running_ids.discard(machine_id)
 
     def inspect_machine(self, *, machine_id: str) -> dict:
-        return {}
+        attachments = dict(self.attachments).get(machine_id, ())
+        network_names = {
+            network.id: network.name for network in self.networks
+        }
+
+        networks = {
+            network_names.get(attachment.network_id, attachment.network_id): {
+                "NetworkID": attachment.network_id,
+                "IPAddress": attachment.ipv4_address,
+            }
+            for attachment in attachments
+        }
+
+        running = machine_id in self.running_ids
+
+        return {
+            "Id": machine_id,
+            "Running": running,
+            "State": {"Running": running},
+            "NetworkSettings": {"Networks": networks},
+        }
 
     def inspect_network(self, *, network_id: str) -> dict:
-        return {}
+        network = next(
+            (item for item in self.networks if item.id == network_id),
+            None,
+        )
+
+        if network is None:
+            raise RuntimeError(f"Unknown fake network '{network_id}'.")
+
+        return {"Id": network.id, "Name": network.name}
+
+    def configure_route(
+        self,
+        *,
+        machine_id: str,
+        destination: str,
+        gateway: str | None = None,
+        interface: str | None = None,
+    ) -> None:
+        if self.fail_route_configuration:
+            raise RuntimeError("route configuration failed")
+
+        self.routes.setdefault(machine_id, []).append(
+            RuntimeRoute(
+                destination=destination,
+                gateway=gateway,
+                interface=interface,
+            )
+        )
+
+    def inspect_routes(self, *, machine_id: str) -> tuple[RuntimeRoute, ...]:
+        return tuple(self.routes.get(machine_id, ()))
+
+    def probe_service(
+        self,
+        *,
+        machine_id: str,
+        host: str,
+        port: int,
+        protocol: str = "tcp",
+    ) -> bool:
+        return not self.fail_probe
+
+    def ping(self, *, machine_id: str, host: str) -> bool:
+        return not self.fail_ping
 
     def execute_command(
         self,
@@ -133,6 +211,8 @@ class FakeRepository:
         self.networks = []
         self.machines = []
         self.interfaces = []
+        self.routes = []
+        self.services = []
         self.committed = False
         self.rolled_back = False
 
@@ -145,7 +225,10 @@ class FakeRepository:
         return self.environment
 
     async def add_network(self, network):
+        if network.id is None:
+            network.id = uuid4()
         self.networks.append(network)
+        self.environment.networks.append(network)
         return network
 
     async def get_network_by_name(
@@ -164,12 +247,32 @@ class FakeRepository:
         return None
 
     async def add_machine(self, machine):
+        if machine.id is None:
+            machine.id = uuid4()
         self.machines.append(machine)
+        self.environment.machines.append(machine)
         return machine
 
     async def add_interface(self, interface):
         self.interfaces.append(interface)
+        machine = interface.machine
+        if machine is not None and interface not in machine.interfaces:
+            machine.interfaces.append(interface)
         return interface
+
+    async def add_route(self, route):
+        self.routes.append(route)
+        machine = route.machine
+        if machine is not None and route not in machine.routes:
+            machine.routes.append(route)
+        return route
+
+    async def add_service(self, service):
+        self.services.append(service)
+        machine = service.machine
+        if machine is not None and service not in machine.services:
+            machine.services.append(service)
+        return service
 
     async def commit(self):
         self.committed = True
@@ -454,8 +557,13 @@ async def test_provision_rejects_missing_network() -> None:
             machines=machines,
         )
 
+    # The definition is validated before any runtime resource exists, so a
+    # bad topology never creates (and then has to clean up) containers or
+    # networks.
     assert environment.state == EnvironmentState.FAILED
-    assert runtime.removed_networks == ["net-1"]
+    assert runtime.networks == []
+    assert runtime.machines == []
+    assert runtime.removed_networks == []
 
 
 @pytest.mark.asyncio
@@ -490,5 +598,5 @@ async def test_provision_rejects_machine_without_interface() -> None:
         )
 
     assert environment.state == EnvironmentState.FAILED
-    assert len(runtime.networks) == 1
-    assert runtime.removed_networks == ["net-1"]
+    assert runtime.networks == []
+    assert runtime.removed_networks == []

@@ -33,6 +33,10 @@ class LabMachine:
     limits: RuntimeMachineLimits
     # False for machines the learner must discover (for example by scanning).
     reveal_address: bool = True
+    # Target Build System artifact this machine runs. For TARGET machines the
+    # runtime spec (image + required services) is resolved from the targets
+    # registry; the Sandbox never builds target content itself.
+    target_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -96,6 +100,7 @@ LINUX_FILE_PERMISSIONS = LabDefinition(
             host_octet=20,
             limits=_PERMISSIONS_TARGET_LIMITS,
             reveal_address=False,
+            target_id="linux-permissions",
         ),
     ),
     objectives=(

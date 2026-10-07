@@ -21,6 +21,8 @@ from .services.environment_service import (
     InterfaceSpec,
     MachineSpec,
     NetworkSpec,
+    RouteSpec,
+    ServiceSpec,
 )
 
 from .labs.router import router as labs_router
@@ -50,7 +52,7 @@ async def create_environment(
         activity_id=request.activity_id,
     )
 
-    return EnvironmentResponse.model_validate(environment)
+    return EnvironmentResponse.from_environment(environment)
 
 
 @router.get(
@@ -72,7 +74,7 @@ async def get_environment(
     if environment is None:
         raise NotFoundError("Environment not found.")
 
-    return EnvironmentResponse.model_validate(environment)
+    return EnvironmentResponse.from_environment(environment)
 
 
 @router.post(
@@ -113,6 +115,24 @@ async def provision_environment(
                 )
                 for interface in machine.interfaces
             ),
+            hostname=machine.hostname,
+            routes=tuple(
+                RouteSpec(
+                    destination=route.destination,
+                    gateway=route.gateway,
+                    network_name=route.network_name,
+                )
+                for route in machine.routes
+            ),
+            services=tuple(
+                ServiceSpec(
+                    name=service.name,
+                    port=service.port,
+                    protocol=service.protocol,
+                    required=service.required,
+                )
+                for service in machine.services
+            ),
         )
         for machine in request.machines
     )
@@ -124,7 +144,7 @@ async def provision_environment(
         machines=machines,
     )
 
-    return EnvironmentResponse.model_validate(environment)
+    return EnvironmentResponse.from_environment(environment)
 
 
 @router.post(
@@ -147,7 +167,7 @@ async def start_environment(
         learner_id=current_user.id,
     )
 
-    return EnvironmentResponse.model_validate(environment)
+    return EnvironmentResponse.from_environment(environment)
 
 
 @router.post(
@@ -170,7 +190,7 @@ async def reset_environment(
         learner_id=current_user.id,
     )
 
-    return EnvironmentResponse.model_validate(environment)
+    return EnvironmentResponse.from_environment(environment)
 
 
 @router.post(
@@ -193,7 +213,7 @@ async def stop_environment(
         learner_id=current_user.id,
     )
 
-    return EnvironmentResponse.model_validate(environment)
+    return EnvironmentResponse.from_environment(environment)
 
 
 @router.post(
@@ -216,10 +236,9 @@ async def validate_environment(
         learner_id=current_user.id,
     )
 
-    return EnvironmentValidationResponse(
+    return EnvironmentValidationResponse.from_result(
         environment_id=environment_id,
-        valid=result.valid,
-        errors=result.errors,
+        result=result,
     )
 
 
@@ -243,4 +262,4 @@ async def terminate_environment(
         learner_id=current_user.id,
     )
 
-    return EnvironmentResponse.model_validate(environment)
+    return EnvironmentResponse.from_environment(environment)

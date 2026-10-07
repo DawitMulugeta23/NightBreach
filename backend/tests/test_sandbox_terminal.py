@@ -20,7 +20,7 @@ from app.domains.sandbox.runtime.provider import RuntimeShell
 from app.domains.sandbox.terminal import router as terminal_module
 from app.domains.sandbox.terminal.service import TerminalService
 from app.domains.sandbox.terminal.tickets import TerminalTicketStore
-from app.models.sandbox import EnvironmentState, MachineRole
+from app.models.sandbox import EnvironmentState, MachineRole, MachineState
 
 LEARNER = uuid4()
 
@@ -101,12 +101,26 @@ class FakeRepository:
         return None
 
 
-def make_environment(state=EnvironmentState.READY, runtime_id="c-attacker"):
+def make_environment(
+    state=EnvironmentState.READY,
+    runtime_id="c-attacker",
+    machine_state=MachineState.READY,
+):
     return SimpleNamespace(
         id=uuid4(), learner_id=LEARNER, state=state,
         machines=[
-            SimpleNamespace(name="attacker", role=MachineRole.ATTACK, runtime_machine_id=runtime_id),
-            SimpleNamespace(name="target", role=MachineRole.TARGET, runtime_machine_id="c-target"),
+            SimpleNamespace(
+                name="attacker",
+                role=MachineRole.ATTACK,
+                runtime_machine_id=runtime_id,
+                state=machine_state,
+            ),
+            SimpleNamespace(
+                name="target",
+                role=MachineRole.TARGET,
+                runtime_machine_id="c-target",
+                state=machine_state,
+            ),
         ],
     )
 
@@ -181,6 +195,27 @@ async def test_terminal_requires_a_runtime_machine():
         await service.create_session(
             learner_id=LEARNER, environment_id=environment.id, machine_name="attacker"
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("machine_state", [
+    MachineState.CREATING,
+    MachineState.STARTING,
+    MachineState.RUNNING,
+    MachineState.STOPPED,
+    MachineState.FAILED,
+])
+async def test_terminal_requires_a_validated_ready_machine(machine_state):
+    """Runtime RUNNING is not READY: readiness comes from validation."""
+    environment = make_environment(machine_state=machine_state)
+    service, store = make_service(environment)
+
+    with pytest.raises(ConflictError):
+        await service.create_session(
+            learner_id=LEARNER, environment_id=environment.id, machine_name="attacker"
+        )
+
+    assert store._tickets == {}
 
 
 # --------------------------- DockerShell ----------------------------------
